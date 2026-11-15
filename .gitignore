@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+/.build/
+/services/api/api
+/services/api/api.exe
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc

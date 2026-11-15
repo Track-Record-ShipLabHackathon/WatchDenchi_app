@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: Go API
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version-file: services/api/go.mod
+          cache-dependency-path: services/api/go.sum
+      - name: Download and verify dependencies
+        run: |
+          go mod download
+          go mod verify
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: Build Linux API
+        run: |
+          output="$RUNNER_TEMP/watchdenchi-api"
+          mkdir -p "$output"
+          go build -trimpath -o "$output/watchdenchi-api" ./cmd/api
+          git rev-parse HEAD > "$output/commit.txt"
+          go version -m "$output/watchdenchi-api" > "$output/build.txt"
+          tar -czf "$RUNNER_TEMP/watchdenchi-api-linux-amd64.tar.gz" -C "$output" watchdenchi-api commit.txt build.txt
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: watchdenchi-api-linux-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/watchdenchi-api-linux-amd64.tar.gz
+          if-no-files-found: error
+
+  database:
+    name: PostgreSQL integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17.12-bookworm
+        env:
+          POSTGRES_DB: watchdenchi
+          POSTGRES_USER: watchdenchi
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U watchdenchi -d watchdenchi"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
+        with:
+          go-version-file: services/api/go.mod
+          cache-dependency-path: services/api/go.sum
+      - name: Apply migrations
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          for migration in db/migrations/*.sql; do
+            docker exec -i "$POSTGRES_CONTAINER" psql -X -v ON_ERROR_STOP=1 -U watchdenchi -d watchdenchi < "$migration"
+          done
+      - name: Test readiness and database schema
+        working-directory: services/api
+        env:
+          WATCHDENCHI_DATABASE_URL: postgres://watchdenchi:ci-only-password@127.0.0.1:${{ job.services.postgres.ports[5432] }}/watchdenchi?sslmode=disable
+        run: go test -race -tags=integration ./...
+
+  mobile:
+    name: Flutter
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
+        with:
+          flutter-version: '3.50.0'
+          channel: stable
+      - run: flutter pub get --enforce-lockfile
+      - name: Check Dart formatting
+        run: |
+          dart format lib test
+          git diff --exit-code -- lib test
+      - run: flutter analyze --no-pub
+      - run: flutter test --no-pub
