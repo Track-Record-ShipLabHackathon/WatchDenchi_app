@@ -10,9 +10,9 @@
 
 ## mainの保護
 
-リポジトリの Settings → Branches で、保護対象を `main` に指定します。
-PRを必須にし、GitHub Actionsでジョブが表示された後に、`Go API`、`PostgreSQL integration`、`Flutter` の成功をマージ条件に選択します。
-force pushと削除は許可しません。レビューは運用で行い、他の承認者が対応できると確認してから承認数を1以上にします。
+リポジトリの Settings → Branches → Add classic branch protection rule で、Branch name pattern に `main` を入力します。
+Require a pull request before merging と Require status checks to pass before merging を有効にします。GitHub Actionsでジョブが表示された後、`Go API`、`PostgreSQL integration`、`Flutter` をマージ条件に選択します。
+Allow force pushes と Allow deletions は無効にします。レビューは運用で行い、他の承認者が対応できると確認してから承認数を1以上にします。
 担当者が決まったらCODEOWNERSの適用を検討します。
 [GitHubのブランチ保護](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
 
