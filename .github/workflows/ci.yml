@@ -4,7 +4,8 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    # Also validate the initial CI branch before its first PR is opened.
+    branches: [main, feature/go-setup]
 
 permissions:
   contents: read
