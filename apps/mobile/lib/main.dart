@@ -20,14 +20,25 @@ const Color shelfEdge = Color(0xFFCA9D72);
 const Color shelfDark = Color(0xFFA77D5D);
 
 const List<String> batteryTypes = [
-  '単1形', '単2形', '単3形', '単4形', '単5形',
-  '9V形', 'CR2032', 'CR2025', 'LR44', 'その他',
+  '単1形',
+  '単2形',
+  '単3形',
+  '単4形',
+  '単5形',
+  '9V形',
+  'CR2032',
+  'CR2025',
+  'LR44',
+  'その他',
 ];
-const List<String> batteryChemistries = [
-  'アルカリ', 'マンガン', '充電池', 'リチウム', '不明',
-];
+const List<String> batteryChemistries = ['アルカリ', 'マンガン', '充電池', 'リチウム', '不明'];
 const List<String> mainManufacturers = [
-  'Panasonic', 'maxell', 'FUJITSU', 'TOSHIBA', 'Duracell', 'その他',
+  'Panasonic',
+  'maxell',
+  'FUJITSU',
+  'TOSHIBA',
+  'Duracell',
+  'その他',
 ];
 
 void main() {
@@ -72,21 +83,21 @@ class BatteryEntry {
   final String chemistry;
 
   Map<String, dynamic> toJson() => {
-        'type': type,
-        'manufacturer': manufacturer,
-        'quantity': quantity,
-        'location': location,
-        'chemistry': chemistry,
-      };
+    'type': type,
+    'manufacturer': manufacturer,
+    'quantity': quantity,
+    'location': location,
+    'chemistry': chemistry,
+  };
 
   factory BatteryEntry.fromJson(Map<String, dynamic> json) => BatteryEntry(
-        type: json['type'] as String? ?? 'その他',
-        manufacturer: json['manufacturer'] as String? ?? '不明',
-        quantity: (json['quantity'] as num?)?.toInt() ?? 0,
-        location: json['location'] as String? ?? '',
-        // 旧データは電池の中身が未登録。アルカリと決めつけない。
-        chemistry: json['chemistry'] as String? ?? '不明',
-      );
+    type: json['type'] as String? ?? 'その他',
+    manufacturer: json['manufacturer'] as String? ?? '不明',
+    quantity: (json['quantity'] as num?)?.toInt() ?? 0,
+    location: json['location'] as String? ?? '',
+    // 旧データは電池の中身が未登録。アルカリと決めつけない。
+    chemistry: json['chemistry'] as String? ?? '不明',
+  );
 }
 
 class DeviceUsage {
@@ -105,21 +116,21 @@ class DeviceUsage {
   final DateTime startedAt;
 
   Map<String, dynamic> toJson() => {
-        'deviceName': deviceName,
-        'type': type,
-        'manufacturer': manufacturer,
-        'quantity': quantity,
-        'startedAt': startedAt.toIso8601String(),
-      };
+    'deviceName': deviceName,
+    'type': type,
+    'manufacturer': manufacturer,
+    'quantity': quantity,
+    'startedAt': startedAt.toIso8601String(),
+  };
 
   factory DeviceUsage.fromJson(Map<String, dynamic> json) => DeviceUsage(
-        deviceName: json['deviceName'] as String? ?? '名前のない機器',
-        type: json['type'] as String? ?? 'その他',
-        manufacturer: json['manufacturer'] as String? ?? '不明',
-        quantity: (json['quantity'] as num?)?.toInt() ?? 1,
-        startedAt: DateTime.tryParse(json['startedAt'] as String? ?? '') ??
-            DateTime.now(),
-      );
+    deviceName: json['deviceName'] as String? ?? '名前のない機器',
+    type: json['type'] as String? ?? 'その他',
+    manufacturer: json['manufacturer'] as String? ?? '不明',
+    quantity: (json['quantity'] as num?)?.toInt() ?? 1,
+    startedAt:
+        DateTime.tryParse(json['startedAt'] as String? ?? '') ?? DateTime.now(),
+  );
 }
 
 // 同じ端末内で、在庫と使用中の機器を別々に保存する。
@@ -132,13 +143,16 @@ class LocalBatteryStore {
   static const String deviceKey = 'watchdenchi_device_usage_v1';
 
   static Future<List<BatteryEntry>> readInventory() async {
-    final saved = await _prefs.getString(inventoryKey) ??
+    final saved =
+        await _prefs.getString(inventoryKey) ??
         await _prefs.getString(olderInventoryKey);
     if (saved == null) return [];
     final decoded = jsonDecode(saved) as List<dynamic>;
     return decoded
-        .map((value) =>
-            BatteryEntry.fromJson(Map<String, dynamic>.from(value as Map)))
+        .map(
+          (value) =>
+              BatteryEntry.fromJson(Map<String, dynamic>.from(value as Map)),
+        )
         .where((entry) => entry.quantity > 0)
         .toList();
   }
@@ -155,8 +169,10 @@ class LocalBatteryStore {
     if (saved == null) return [];
     final decoded = jsonDecode(saved) as List<dynamic>;
     return decoded
-        .map((value) =>
-            DeviceUsage.fromJson(Map<String, dynamic>.from(value as Map)))
+        .map(
+          (value) =>
+              DeviceUsage.fromJson(Map<String, dynamic>.from(value as Map)),
+        )
         .toList();
   }
 
@@ -224,14 +240,18 @@ class _SoftBatteryPainter extends CustomPainter {
     // 底と金属キャップ。
     paint.color = const Color(0xFFAAA29C);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(const Rect.fromLTWH(3, 8, 34, 65),
-          const Radius.circular(5)),
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(3, 8, 34, 65),
+        const Radius.circular(5),
+      ),
       paint,
     );
     paint.color = const Color(0xFFAFA6A1);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(const Rect.fromLTWH(14, 1, 12, 10),
-          const Radius.circular(2.5)),
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(14, 1, 12, 10),
+        const Radius.circular(2.5),
+      ),
       paint,
     );
     paint.color = const Color(0xFFC2BAB5);
@@ -239,8 +259,12 @@ class _SoftBatteryPainter extends CustomPainter {
 
     // 白い電池本体と色付きの上部。
     canvas.save();
-    canvas.clipRRect(RRect.fromRectAndRadius(
-        const Rect.fromLTWH(3, 9, 34, 62), const Radius.circular(4)));
+    canvas.clipRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(3, 9, 34, 62),
+        const Radius.circular(4),
+      ),
+    );
     paint.color = const Color(0xFFFAF9F3);
     canvas.drawRect(const Rect.fromLTWH(3, 9, 34, 62), paint);
     paint.color = accent;
@@ -265,8 +289,10 @@ class _SoftBatteryPainter extends CustomPainter {
     canvas.drawRect(const Rect.fromLTWH(3, 9, 34, 2), paint);
     paint.color = const Color(0xFFB3A8A2);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(const Rect.fromLTWH(3, 69, 34, 4),
-          const Radius.circular(2)),
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(3, 69, 34, 4),
+        const Radius.circular(2),
+      ),
       paint,
     );
     canvas.restore();
@@ -325,7 +351,9 @@ class _HomePageState extends State<HomePage> {
       context: context,
       builder: (dialogContext) => CupertinoAlertDialog(
         title: const Text('使用を終了しますか？'),
-        content: Text('${usage.deviceName}で使っている${usage.quantity}本を使用中一覧から外します。\n在庫には戻しません。'),
+        content: Text(
+          '${usage.deviceName}で使っている${usage.quantity}本を使用中一覧から外します。\n在庫には戻しません。',
+        ),
         actions: [
           CupertinoDialogAction(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -353,7 +381,10 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final stockCount = inventory.fold<int>(0, (sum, item) => sum + item.quantity);
+    final stockCount = inventory.fold<int>(
+      0,
+      (sum, item) => sum + item.quantity,
+    );
     final usingCount = devices.fold<int>(0, (sum, item) => sum + item.quantity);
     final deviceCount = devices.map((e) => e.deviceName).toSet().length;
 
@@ -370,7 +401,6 @@ class _HomePageState extends State<HomePage> {
             : ListView(
                 padding: const EdgeInsets.fromLTRB(22, 18, 22, 32),
                 children: [
-
                   // 在庫棚をそのまま開ける大きなボタン。
                   CupertinoButton(
                     padding: EdgeInsets.zero,
@@ -393,7 +423,10 @@ class _HomePageState extends State<HomePage> {
                                 children: [
                                   SoftBattery(manufacturer: 'maxell', size: 51),
                                   SizedBox(width: 1),
-                                  SoftBattery(manufacturer: 'Panasonic', size: 51),
+                                  SoftBattery(
+                                    manufacturer: 'Panasonic',
+                                    size: 51,
+                                  ),
                                 ],
                               ),
                             ),
@@ -403,29 +436,43 @@ class _HomePageState extends State<HomePage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('在庫棚',
-                                    style: TextStyle(
-                                      color: ink,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 18,
-                                    )),
+                                const Text(
+                                  '在庫棚',
+                                  style: TextStyle(
+                                    color: ink,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 18,
+                                  ),
+                                ),
                                 const SizedBox(height: 5),
-                                Text('ストック：$stockCount 本',
-                                    style: const TextStyle(
-                                        color: mutedInk, fontSize: 14)),
+                                Text(
+                                  'ストック：$stockCount 本',
+                                  style: const TextStyle(
+                                    color: mutedInk,
+                                    fontSize: 14,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
-                          const Icon(CupertinoIcons.chevron_right,
-                              size: 18, color: mutedInk),
+                          const Icon(
+                            CupertinoIcons.chevron_right,
+                            size: 18,
+                            color: mutedInk,
+                          ),
                         ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 25),
-                  const Text('いま使っている電池',
-                      style: TextStyle(color: ink, fontSize: 20,
-                          fontWeight: FontWeight.w700)),
+                  const Text(
+                    'いま使っている電池',
+                    style: TextStyle(
+                      color: ink,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                   const SizedBox(height: 10),
                   Row(
                     children: [
@@ -438,20 +485,31 @@ class _HomePageState extends State<HomePage> {
                   if (devices.isEmpty)
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 25),
+                        horizontal: 20,
+                        vertical: 25,
+                      ),
                       decoration: softCardDecoration(),
                       child: const Column(
                         children: [
-                          Icon(CupertinoIcons.house_alt,
-                              color: Color(0xFFC09A7D), size: 30),
+                          Icon(
+                            CupertinoIcons.house_alt,
+                            color: Color(0xFFC09A7D),
+                            size: 30,
+                          ),
                           SizedBox(height: 10),
-                          Text('まだ使用中の電池はありません',
-                              style: TextStyle(
-                                  color: ink, fontWeight: FontWeight.w600)),
+                          Text(
+                            'まだ使用中の電池はありません',
+                            style: TextStyle(
+                              color: ink,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                           SizedBox(height: 6),
-                          Text('在庫棚の電池をタップして、\n使う機器を登録',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: mutedInk, fontSize: 13)),
+                          Text(
+                            '在庫棚の電池をタップして、\n使う機器を登録',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: mutedInk, fontSize: 13),
+                          ),
                         ],
                       ),
                     )
@@ -464,43 +522,63 @@ class _HomePageState extends State<HomePage> {
                           decoration: softCardDecoration(),
                           child: Row(
                             children: [
-                              const Icon(CupertinoIcons.house_fill,
-                                  color: Color(0xFFC69A82), size: 24),
+                              const Icon(
+                                CupertinoIcons.house_fill,
+                                color: Color(0xFFC69A82),
+                                size: 24,
+                              ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(usage.deviceName,
-                                        style: const TextStyle(
-                                            color: ink, fontSize: 16,
-                                            fontWeight: FontWeight.w700)),
+                                    Text(
+                                      usage.deviceName,
+                                      style: const TextStyle(
+                                        color: ink,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
                                     const SizedBox(height: 3),
-                                    Text('${usage.type}・${usage.quantity}本・${usage.manufacturer}',
-                                        style: const TextStyle(
-                                            color: mutedInk, fontSize: 12)),
+                                    Text(
+                                      '${usage.type}・${usage.quantity}本・${usage.manufacturer}',
+                                      style: const TextStyle(
+                                        color: mutedInk,
+                                        fontSize: 12,
+                                      ),
+                                    ),
                                     const SizedBox(height: 3),
-                                    Text(_elapsedLabel(usage.startedAt),
-                                        style: const TextStyle(
-                                            color: mutedInk, fontSize: 12)),
+                                    Text(
+                                      _elapsedLabel(usage.startedAt),
+                                      style: const TextStyle(
+                                        color: mutedInk,
+                                        fontSize: 12,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
                               CupertinoButton(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 8),
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
                                 onPressed: () => finishUsage(usage),
-                                child: const Text('使用終了',
-                                    style: TextStyle(
-                                        color: coral, fontSize: 12)),
+                                child: const Text(
+                                  '使用終了',
+                                  style: TextStyle(color: coral, fontSize: 12),
+                                ),
                               ),
                             ],
                           ),
                         ),
                       ),
                   const SizedBox(height: 11),
-                  const Text('※ 使用本数と開始日を記録しています。電池の残寿命の予測は今後追加予定です。',
-                      style: TextStyle(color: mutedInk, fontSize: 11)),
+                  const Text(
+                    '※ 使用本数と開始日を記録しています。電池の残寿命の予測は今後追加予定です。',
+                    style: TextStyle(color: mutedInk, fontSize: 11),
+                  ),
                 ],
               ),
       ),
@@ -521,15 +599,20 @@ class _CountPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-        decoration: BoxDecoration(
-          color: paleCoral,
-          borderRadius: BorderRadius.circular(13),
-        ),
-        child: Text('$label  $value',
-            style: const TextStyle(
-                color: ink, fontSize: 13, fontWeight: FontWeight.w600)),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+    decoration: BoxDecoration(
+      color: paleCoral,
+      borderRadius: BorderRadius.circular(13),
+    ),
+    child: Text(
+      '$label  $value',
+      style: const TextStyle(
+        color: ink,
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  );
 }
 
 class InventoryPage extends StatefulWidget {
@@ -575,12 +658,14 @@ class _InventoryPageState extends State<InventoryPage> {
     if (!mounted || newEntry == null) return;
 
     final updated = [...entries];
-    final i = updated.indexWhere((entry) =>
-        entry.type == newEntry.type &&
-        entry.manufacturer.toLowerCase() ==
-            newEntry.manufacturer.toLowerCase() &&
-        entry.location == newEntry.location &&
-        entry.chemistry == newEntry.chemistry);
+    final i = updated.indexWhere(
+      (entry) =>
+          entry.type == newEntry.type &&
+          entry.manufacturer.toLowerCase() ==
+              newEntry.manufacturer.toLowerCase() &&
+          entry.location == newEntry.location &&
+          entry.chemistry == newEntry.chemistry,
+    );
     if (i == -1) {
       updated.add(newEntry);
     } else {
@@ -626,7 +711,8 @@ class _InventoryPageState extends State<InventoryPage> {
       );
     }
 
-    final updatedDevices = [...devices,
+    final updatedDevices = [
+      ...devices,
       DeviceUsage(
         deviceName: request.deviceName,
         type: entry.type,
@@ -647,8 +733,7 @@ class _InventoryPageState extends State<InventoryPage> {
       });
     } catch (error) {
       if (!mounted) return;
-      await showError(context,
-          '保存に失敗しました。通信ではなく端末保存のエラーです。\n$error');
+      await showError(context, '保存に失敗しました。通信ではなく端末保存のエラーです。\n$error');
     }
   }
 
@@ -656,7 +741,10 @@ class _InventoryPageState extends State<InventoryPage> {
   Widget build(BuildContext context) {
     final groupedTypes = <String>[
       ...batteryTypes.where((type) => entries.any((e) => e.type == type)),
-      ...entries.map((e) => e.type).where((t) => !batteryTypes.contains(t)).toSet(),
+      ...entries
+          .map((e) => e.type)
+          .where((t) => !batteryTypes.contains(t))
+          .toSet(),
     ];
 
     return CupertinoPageScaffold(
@@ -668,50 +756,59 @@ class _InventoryPageState extends State<InventoryPage> {
         trailing: CupertinoButton(
           padding: EdgeInsets.zero,
           onPressed: openAddPage,
-          child: const Icon(CupertinoIcons.add_circled_solid,
-              size: 28, color: coral),
+          child: const Icon(
+            CupertinoIcons.add_circled_solid,
+            size: 28,
+            color: coral,
+          ),
         ),
       ),
       child: SafeArea(
         child: loading
             ? const Center(child: CupertinoActivityIndicator())
             : entries.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SoftBattery(manufacturer: 'maxell', size: 95),
-                          const SizedBox(height: 14),
-                          const Text('棚はまだ空っぽです',
-                              style: TextStyle(
-                                  color: ink, fontSize: 19,
-                                  fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 8),
-                          const Text('右上の＋から電池を並べてみよう。',
-                              style: TextStyle(color: mutedInk)),
-                          const SizedBox(height: 18),
-                          CupertinoButton.filled(
-                            onPressed: openAddPage,
-                            child: const Text('電池を追加'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : ListView(
-                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 36),
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      const SizedBox(height: 18),
-                      for (final type in groupedTypes)
-                        _ShelfSection(
-                          title: type,
-                          entries: entries.where((e) => e.type == type).toList(),
-                          onUse: useBattery,
+                      const SoftBattery(manufacturer: 'maxell', size: 95),
+                      const SizedBox(height: 14),
+                      const Text(
+                        '棚はまだ空っぽです',
+                        style: TextStyle(
+                          color: ink,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w700,
                         ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '右上の＋から電池を並べてみよう。',
+                        style: TextStyle(color: mutedInk),
+                      ),
+                      const SizedBox(height: 18),
+                      CupertinoButton.filled(
+                        onPressed: openAddPage,
+                        child: const Text('電池を追加'),
+                      ),
                     ],
                   ),
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 36),
+                children: [
+                  const SizedBox(height: 18),
+                  for (final type in groupedTypes)
+                    _ShelfSection(
+                      title: type,
+                      entries: entries.where((e) => e.type == type).toList(),
+                      onUse: useBattery,
+                    ),
+                ],
+              ),
       ),
     );
   }
@@ -740,8 +837,11 @@ class _ShelfSection extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: const Color(0xFFE0CAAE), width: 2),
           boxShadow: const [
-            BoxShadow(color: Color(0x11000000),
-                blurRadius: 12, offset: Offset(0, 5)),
+            BoxShadow(
+              color: Color(0x11000000),
+              blurRadius: 12,
+              offset: Offset(0, 5),
+            ),
           ],
         ),
         child: Column(
@@ -750,17 +850,28 @@ class _ShelfSection extends StatelessWidget {
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: paper,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text(title, style: const TextStyle(
-                      color: ink, fontSize: 16, fontWeight: FontWeight.w700)),
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      color: ink,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
                 const Spacer(),
-                Text('${entries.fold<int>(0, (n, e) => n + e.quantity)}本',
-                    style: const TextStyle(color: mutedInk, fontSize: 13)),
+                Text(
+                  '${entries.fold<int>(0, (n, e) => n + e.quantity)}本',
+                  style: const TextStyle(color: mutedInk, fontSize: 13),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -770,15 +881,22 @@ class _ShelfSection extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(entry.manufacturer, style: const TextStyle(
-                        color: ink, fontSize: 16,
-                        fontWeight: FontWeight.w700)),
+                    Text(
+                      entry.manufacturer,
+                      style: const TextStyle(
+                        color: ink,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const SizedBox(height: 3),
-                    Text([
-                      if (entry.chemistry.isNotEmpty) entry.chemistry,
-                      if (entry.location.isNotEmpty) entry.location,
-                    ].join(' ・ '), style: const TextStyle(
-                        color: mutedInk, fontSize: 12)),
+                    Text(
+                      [
+                        if (entry.chemistry.isNotEmpty) entry.chemistry,
+                        if (entry.location.isNotEmpty) entry.location,
+                      ].join(' ・ '),
+                      style: const TextStyle(color: mutedInk, fontSize: 12),
+                    ),
                     const SizedBox(height: 10),
                     Wrap(
                       crossAxisAlignment: WrapCrossAlignment.end,
@@ -790,7 +908,9 @@ class _ShelfSection extends StatelessWidget {
                             behavior: HitTestBehavior.opaque,
                             onTap: () => onUse(entry),
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 2,
+                              ),
                               child: SoftBattery(
                                 manufacturer: entry.manufacturer,
                                 size: 73,
@@ -809,9 +929,13 @@ class _ShelfSection extends StatelessWidget {
                                 color: paper.withAlpha(195),
                                 borderRadius: BorderRadius.circular(14),
                               ),
-                              child: Text('+${entry.quantity - 5}',
-                                  style: const TextStyle(color: ink,
-                                      fontWeight: FontWeight.w700)),
+                              child: Text(
+                                '+${entry.quantity - 5}',
+                                style: const TextStyle(
+                                  color: ink,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
                           ),
                       ],
@@ -829,8 +953,11 @@ class _ShelfSection extends StatelessWidget {
                   ),
                   borderRadius: BorderRadius.circular(4),
                   boxShadow: const [
-                    BoxShadow(color: Color(0x23000000),
-                        blurRadius: 4, offset: Offset(0, 3)),
+                    BoxShadow(
+                      color: Color(0x23000000),
+                      blurRadius: 4,
+                      offset: Offset(0, 3),
+                    ),
                   ],
                 ),
               ),
@@ -874,16 +1001,19 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
       setState(() => error = '使う機器の名前を入力');
       return;
     }
-    Navigator.of(context).pop(
-      UseBatteryRequest(deviceName: name, quantity: count),
-    );
+    Navigator.of(context)
+        .pop(UseBatteryRequest(deviceName: name, quantity: count));
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: EdgeInsets.fromLTRB(
-          22, 22, 22, MediaQuery.of(context).viewInsets.bottom + 26),
+        22,
+        22,
+        22,
+        MediaQuery.of(context).viewInsets.bottom + 26,
+      ),
       decoration: const BoxDecoration(
         color: cream,
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -895,15 +1025,24 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('どこで使う？',
-                  style: TextStyle(color: ink, fontSize: 23,
-                      fontWeight: FontWeight.w700)),
+              const Text(
+                'どこで使う？',
+                style: TextStyle(
+                  color: ink,
+                  fontSize: 23,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 5),
-              Text('${widget.entry.manufacturer}・${widget.entry.type}',
-                  style: const TextStyle(color: mutedInk, fontSize: 14)),
+              Text(
+                '${widget.entry.manufacturer}・${widget.entry.type}',
+                style: const TextStyle(color: mutedInk, fontSize: 14),
+              ),
               const SizedBox(height: 18),
-              const Text('使う機器', style: TextStyle(
-                  color: ink, fontWeight: FontWeight.w600)),
+              const Text(
+                '使う機器',
+                style: TextStyle(color: ink, fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 7),
               CupertinoTextField(
                 controller: deviceController,
@@ -912,8 +1051,10 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
                 decoration: inputDecoration(),
               ),
               const SizedBox(height: 18),
-              const Text('使う本数', style: TextStyle(
-                  color: ink, fontWeight: FontWeight.w600)),
+              const Text(
+                '使う本数',
+                style: TextStyle(color: ink, fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 9),
               Row(
                 children: [
@@ -921,28 +1062,39 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
                     color: const Color(0xFFE5D5C5),
                     padding: const EdgeInsets.all(10),
                     onPressed: count > 1 ? () => setState(() => count--) : null,
-                    child: const Icon(CupertinoIcons.minus,
-                        color: ink, size: 20),
+                    child: const Icon(
+                      CupertinoIcons.minus,
+                      color: ink,
+                      size: 20,
+                    ),
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 19),
-                    child: Text('$count 本',
-                        style: const TextStyle(color: ink, fontSize: 20,
-                            fontWeight: FontWeight.w700)),
+                    child: Text(
+                      '$count 本',
+                      style: const TextStyle(
+                        color: ink,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                   CupertinoButton(
                     color: const Color(0xFFE5D5C5),
                     padding: const EdgeInsets.all(10),
                     onPressed: count < widget.entry.quantity
-                        ? () => setState(() => count++) : null,
-                    child: const Icon(CupertinoIcons.add,
-                        color: ink, size: 20),
+                        ? () => setState(() => count++)
+                        : null,
+                    child: const Icon(CupertinoIcons.add, color: ink, size: 20),
                   ),
                 ],
               ),
               if (error != null) ...[
                 const SizedBox(height: 8),
-                Text(error!, style: const TextStyle(color: coral, fontSize: 12)),
+                Text(
+                  error!,
+                  style: const TextStyle(color: coral, fontSize: 12),
+                ),
               ],
               const SizedBox(height: 18),
               SizedBox(
@@ -957,8 +1109,7 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
                 width: double.infinity,
                 child: CupertinoButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('やめる',
-                      style: TextStyle(color: mutedInk)),
+                  child: const Text('やめる', style: TextStyle(color: mutedInk)),
                 ),
               ),
             ],
@@ -979,8 +1130,9 @@ class AddBatteryPage extends StatefulWidget {
 class _AddBatteryPageState extends State<AddBatteryPage> {
   final TextEditingController otherManufacturerController =
       TextEditingController();
-  final TextEditingController quantityController =
-      TextEditingController(text: '1');
+  final TextEditingController quantityController = TextEditingController(
+    text: '1',
+  );
   final TextEditingController locationController = TextEditingController();
   String manufacturer = 'Panasonic';
   String type = '単3形';
@@ -1028,13 +1180,15 @@ class _AddBatteryPageState extends State<AddBatteryPage> {
       return;
     }
     if (!mounted) return;
-    Navigator.of(context).pop(BatteryEntry(
-      type: type,
-      manufacturer: actualManufacturer,
-      quantity: quantity,
-      location: locationController.text.trim(),
-      chemistry: chemistry,
-    ));
+    Navigator.of(context).pop(
+      BatteryEntry(
+        type: type,
+        manufacturer: actualManufacturer,
+        quantity: quantity,
+        location: locationController.text.trim(),
+        chemistry: chemistry,
+      ),
+    );
   }
 
   @override
@@ -1052,10 +1206,15 @@ class _AddBatteryPageState extends State<AddBatteryPage> {
           children: [
             const Center(child: SoftBattery(manufacturer: 'maxell', size: 88)),
             const SizedBox(height: 14),
-            const Text('電池を棚にならべよう',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: ink, fontSize: 21,
-                    fontWeight: FontWeight.w700)),
+            const Text(
+              '電池を棚にならべよう',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: ink,
+                fontSize: 21,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             const SizedBox(height: 24),
             const _FieldTitle('メーカー'),
             _PickerField(
@@ -1075,8 +1234,10 @@ class _AddBatteryPageState extends State<AddBatteryPage> {
                 decoration: inputDecoration(),
               ),
               const SizedBox(height: 6),
-              const Text('デザインは共通ですが、入力したメーカー名は保存します。',
-                  style: TextStyle(color: mutedInk, fontSize: 11)),
+              const Text(
+                'デザインは共通ですが、入力したメーカー名は保存します。',
+                style: TextStyle(color: mutedInk, fontSize: 11),
+              ),
             ],
             const SizedBox(height: 19),
             const _FieldTitle('電池のサイズ'),
@@ -1136,10 +1297,16 @@ class _FieldTitle extends StatelessWidget {
   final String title;
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(title, style: const TextStyle(
-            color: ink, fontSize: 14, fontWeight: FontWeight.w600)),
-      );
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(
+      title,
+      style: const TextStyle(
+        color: ink,
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  );
 }
 
 class _PickerField extends StatelessWidget {
@@ -1148,35 +1315,33 @@ class _PickerField extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) => CupertinoButton(
-        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 14),
-        color: paper,
-        borderRadius: BorderRadius.circular(14),
-        onPressed: onTap,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(value, style: const TextStyle(color: ink, fontSize: 15)),
-            const Icon(CupertinoIcons.chevron_down,
-                size: 15, color: mutedInk),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 14),
+    color: paper,
+    borderRadius: BorderRadius.circular(14),
+    onPressed: onTap,
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(value, style: const TextStyle(color: ink, fontSize: 15)),
+        const Icon(CupertinoIcons.chevron_down, size: 15, color: mutedInk),
+      ],
+    ),
+  );
 }
 
 BoxDecoration softCardDecoration() => BoxDecoration(
-      color: paper,
-      borderRadius: BorderRadius.circular(20),
-      boxShadow: const [
-        BoxShadow(color: Color(0x0B573C25),
-            blurRadius: 14, offset: Offset(0, 5)),
-      ],
-    );
+  color: paper,
+  borderRadius: BorderRadius.circular(20),
+  boxShadow: const [
+    BoxShadow(color: Color(0x0B573C25), blurRadius: 14, offset: Offset(0, 5)),
+  ],
+);
 
 BoxDecoration inputDecoration() => BoxDecoration(
-      color: paper,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: const Color(0xFFE6D9C8)),
-    );
+  color: paper,
+  borderRadius: BorderRadius.circular(14),
+  border: Border.all(color: const Color(0xFFE6D9C8)),
+);
 
 Future<void> showError(BuildContext context, String message) {
   return showCupertinoDialog<void>(
