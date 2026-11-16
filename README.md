@@ -5,13 +5,17 @@
 
 ## アプリケーションアーキテクチャ
 
-Watch-Denchi_appは、Flutter・Go・PostgreSQLの３層で構成される。
+Watch-Denchi_appは、Flutter・Go・PostgreSQLの３層アーキテクチャで構成される。
+
+- **Flutter**：プレゼンテーション層
+- **Go**：アプリケーション層（API Server）
+- **PostgreSQL**：データベース層
 
 ```mermaid
 flowchart TB
-    Flutter["Flutter<br/>(プレゼンテーション層)"]
-    Go["Go<br/>(アプリケーション層：API Server)<br/>"]
-    DB["PostgreSQL<br/>データ層<br/>"]
+    Flutter["<strong>Flutter</strong><br/>Web：GitHub Pages<br/>Android：APK"]
+    Go["<strong>Go</strong><br/>Render Web Service"]
+    DB["<strong>PostgreSQL</strong><br/>Render Postgres"]
     Python["Python（☆2）<br/>推論SOA<br/>"]
 
     Flutter <-->|API| Go
@@ -40,7 +44,7 @@ WatchDenchi_app/
 ├── BACK/                               ー Go（アプリケーション層）
 │   ├── go.mod                          
 │   ├── go.sum                          
-│   ├── main.go                         
+│   ├── main.go                         ーー HTTP Server
 │   ├── handlers/                       ーー Fultter向けAPI
 │   │   ├── create_client.go                ☆1：POST  /api/client
 │   │   ├── create_device_battery.go        ☆1：POST  /api/device-battery
