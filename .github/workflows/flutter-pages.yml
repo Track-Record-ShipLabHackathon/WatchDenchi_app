@@ -1,0 +1,55 @@
+
+name: Deploy WatchDenchi Web
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'FRONT/**'
+      - '.github/workflows/flutter-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: FRONT
+        run: flutter pub get
+
+      - name: Build Flutter Web
+        working-directory: FRONT
+        run: flutter build web --release --base-href /WatchDenchi_app/
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: FRONT/build/web
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
