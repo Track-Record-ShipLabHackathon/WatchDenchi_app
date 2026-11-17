@@ -33,6 +33,8 @@ func main() {
 
 	mux.HandleFunc("POST /api/battery", handlers.RegisterBattery(db))
 
+	mux.HandleFunc("GET /api/battery", handlers.ListBatteries(db))
+
 	port := os.Getenv("PORT");
 	addr := "127.0.0.1:8080"
 	if (port != "") {
