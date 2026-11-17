@@ -207,6 +207,7 @@ class DeviceUsage {
     this.iconKey,
     this.status = 'active',
     this.endedAt,
+    this.manualReplacementAt,
   });
 
   final String deviceName;
@@ -219,6 +220,21 @@ class DeviceUsage {
   // 使用終了後も記録を残す。旧データは使用中として読み込む。
   final String status;
   final DateTime? endedAt;
+  // ユーザーが指定した交換目安日。実測残量やAI予測値ではない。
+  // 予測APIができたら別フィールドで保持する。
+  final DateTime? manualReplacementAt;
+
+  DeviceUsage withManualReplacementAt(DateTime? target) => DeviceUsage(
+        deviceName: deviceName,
+        type: type,
+        manufacturer: manufacturer,
+        quantity: quantity,
+        startedAt: startedAt,
+        iconKey: iconKey,
+        status: status,
+        endedAt: endedAt,
+        manualReplacementAt: target,
+      );
 
   bool get isActive => status == 'active';
 
@@ -231,6 +247,7 @@ class DeviceUsage {
         iconKey: iconKey,
         status: 'inactive',
         endedAt: endTime,
+        manualReplacementAt: manualReplacementAt,
       );
 
   Map<String, dynamic> toJson() => {
@@ -242,6 +259,7 @@ class DeviceUsage {
         'iconKey': iconKey,
         'status': status,
         'endedAt': endedAt?.toIso8601String(),
+        'manualReplacementAt': manualReplacementAt?.toIso8601String(),
       };
 
   factory DeviceUsage.fromJson(Map<String, dynamic> json) => DeviceUsage(
@@ -254,6 +272,8 @@ class DeviceUsage {
         iconKey: json['iconKey'] as String?,
         status: json['status'] as String? ?? 'active',
         endedAt: DateTime.tryParse(json['endedAt'] as String? ?? ''),
+        manualReplacementAt:
+            DateTime.tryParse(json['manualReplacementAt'] as String? ?? ''),
       );
 }
 
@@ -324,6 +344,175 @@ class LocalBatteryStore {
       ),
     }));
   }
+}
+
+// 手入力の「交換目安日」と実際の電池残量は別の情報。
+// 将来の予測結果と混同しないように、日付は独立した値として保存する。
+String formatReplacementDate(DateTime value) =>
+    '${value.year}年${value.month}月${value.day}日';
+
+int daysUntilReplacement(DateTime target, DateTime now) {
+  final day = DateTime(now.year, now.month, now.day);
+  final due = DateTime(target.year, target.month, target.day);
+  return due.difference(day).inDays;
+}
+
+// 日付の入力は任意。キャンセル時はnullを返して以前の設定を維持する。
+Future<DateTime?> pickManualReplacementDate(
+  BuildContext context, {
+  DateTime? current,
+}) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final maxDate = DateTime(today.year + 5, today.month, today.day);
+  DateTime chosen = current != null && !current.isBefore(today) &&
+          !current.isAfter(maxDate)
+      ? current
+      : today.add(const Duration(days: 90));
+  if (chosen.isAfter(maxDate)) chosen = maxDate;
+  return showCupertinoModalPopup<DateTime>(
+    context: context,
+    builder: (popupContext) => Container(
+      height: 335,
+      color: paper,
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            SizedBox(
+              height: 55,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  CupertinoButton(
+                    onPressed: () => Navigator.of(popupContext).pop(),
+                    child: const Text('キャンセル',
+                        style: TextStyle(color: mutedInk)),
+                  ),
+                  const Text('交換目安日を選ぶ',
+                      style: TextStyle(color: ink,
+                          fontWeight: FontWeight.w700)),
+                  CupertinoButton(
+                    onPressed: () => Navigator.of(popupContext).pop(chosen),
+                    child: const Text('決定',
+                        style: TextStyle(color: coral,
+                            fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: CupertinoDatePicker(
+                mode: CupertinoDatePickerMode.date,
+                initialDateTime: chosen,
+                minimumDate: today,
+                maximumDate: maxDate,
+                onDateTimeChanged: (value) => chosen = value,
+              ),
+            ),
+            const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+// 交換「予定日」との距離を小さなバッジにする。残量%ではない。
+class _ManualReplacementBadge extends StatelessWidget {
+  const _ManualReplacementBadge({required this.target});
+  final DateTime? target;
+
+  @override
+  Widget build(BuildContext context) {
+    final days = target == null
+        ? null
+        : daysUntilReplacement(target!, DateTime.now());
+    final Color fill;
+    final String label;
+    final int batteryLevel;
+    if (days == null) {
+      fill = const Color(0xFF9B958F);
+      label = '未設定';
+      batteryLevel = 0;
+    } else if (days <= 0) {
+      fill = const Color(0xFFD86B64);
+      label = '交換';
+      batteryLevel = 0;
+    } else if (days <= 14) {
+      fill = const Color(0xFFE6AD36);
+      label = '注意';
+      batteryLevel = 1;
+    } else {
+      fill = const Color(0xFF68A678);
+      label = '安心';
+      batteryLevel = 3;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(50),
+        border: Border.all(color: paper, width: 1.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (days != null) ...[
+            _TinyBattery(level: batteryLevel),
+            const SizedBox(width: 4),
+          ],
+          Text(label,
+              style: const TextStyle(
+                color: CupertinoColors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              )),
+        ],
+      ),
+    );
+  }
+}
+
+class _TinyBattery extends StatelessWidget {
+  const _TinyBattery({required this.level});
+  final int level;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 15,
+            height: 9,
+            padding: const EdgeInsets.all(1.6),
+            decoration: BoxDecoration(
+              border: Border.all(color: CupertinoColors.white, width: 1.2),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: level == 0 ? 0.13 : level / 3,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: CupertinoColors.white,
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Container(
+            width: 2,
+            height: 4,
+            decoration: const BoxDecoration(
+              color: CupertinoColors.white,
+              borderRadius: BorderRadius.horizontal(right: Radius.circular(1)),
+            ),
+          ),
+        ],
+      );
 }
 
 // 電池のメーカー別カラー
@@ -545,6 +734,214 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // 使用中のアイコンをタップしたときだけ操作を表示
+  Future<void> openDeviceActions(DeviceUsage usage) async {
+    final action = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (popupContext) => CupertinoActionSheet(
+        title: Text(usage.deviceName),
+        message: Text(
+          '${usage.type}・${usage.quantity}本・${usage.manufacturer}'
+          '\n交換目安：${usage.manualReplacementAt == null ? '未設定' : formatReplacementDate(usage.manualReplacementAt!)}'
+          '\n※ 手入力の予定日です（実際の残量ではありません）',
+        ),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(popupContext).pop('date'),
+            child: Text(usage.manualReplacementAt == null
+                ? '交換目安日を設定する' : '交換目安日を変更する'),
+          ),
+          if (usage.manualReplacementAt != null)
+            CupertinoActionSheetAction(
+              onPressed: () => Navigator.of(popupContext).pop('clear-date'),
+              child: const Text('交換目安日を解除する'),
+            ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(popupContext).pop('replace'),
+            child: const Text('電池を交換する'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(popupContext).pop('finish'),
+            child: const Text('使用を終了する'),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(popupContext).pop(),
+          child: const Text('キャンセル'),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'finish') {
+      await finishUsage(usage);
+    } else if (action == 'replace') {
+      await chooseReplacement(usage);
+    } else if (action == 'date') {
+      await updateManualReplacementDate(usage);
+    } else if (action == 'clear-date') {
+      await updateManualReplacementDate(usage, clear: true);
+    }
+  }
+
+  Future<void> updateManualReplacementDate(
+    DeviceUsage usage, {bool clear = false}
+  ) async {
+    final DateTime? selected;
+    if (clear) {
+      selected = null;
+    } else {
+      selected = await pickManualReplacementDate(
+        context, current: usage.manualReplacementAt,
+      );
+      if (selected == null) return; // キャンセルは既存値を維持
+    }
+    if (!mounted) return;
+    final index = devices.indexOf(usage);
+    if (index < 0 || !devices[index].isActive) return;
+    final updated = [...devices];
+    updated[index] = usage.withManualReplacementAt(selected);
+    try {
+      await LocalBatteryStore.saveDevices(updated);
+      if (!mounted) return;
+      setState(() => devices = updated);
+    } catch (error) {
+      if (!mounted) return;
+      await showError(context, '交換目安日を保存できませんでした\n$error');
+    }
+  }
+
+  // 新しい電池を在庫棚から選び、同じ機器の使用履歴を継続する
+  Future<void> chooseReplacement(DeviceUsage usage) async {
+    final choices = inventory
+        .where((entry) => entry.type == usage.type)
+        .toList();
+    if (choices.isEmpty) {
+      await showCupertinoDialog<void>(
+        context: context,
+        builder: (dialogContext) => CupertinoAlertDialog(
+          title: const Text('交換できる電池がありません'),
+          content: Text('在庫棚に${usage.type}を登録してから交換してね。'),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    final selected = await showCupertinoModalPopup<BatteryEntry>(
+      context: context,
+      builder: (popupContext) => CupertinoActionSheet(
+        title: const Text('交換する電池を選ぶ'),
+        message: Text('${usage.deviceName}には${usage.type}を${usage.quantity}本使用中。新しい電池を選んでね。'),
+        actions: [
+          for (final entry in choices)
+            if (entry.quantity >= usage.quantity)
+              CupertinoActionSheetAction(
+                onPressed: () => Navigator.of(popupContext).pop(entry),
+                child: Text(
+                  '${entry.manufacturer}・${entry.chemistry}　${entry.location}　'
+                  '${entry.quantity}本',
+                ),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 13,
+                  horizontal: 16,
+                ),
+                child: Text(
+                  '${entry.manufacturer}・${entry.chemistry}　${entry.location}　'
+                  '${entry.quantity}本（在庫不足）',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: mutedInk, fontSize: 14),
+                ),
+              ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(popupContext).pop(),
+          child: const Text('キャンセル'),
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    final confirmed = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: const Text('電池を交換しますか？'),
+        content: Text(
+          '${usage.deviceName}の使用中の電池を終了し、'
+          '${selected.manufacturer}の${selected.type}を${usage.quantity}本使い始めます。'
+          '\n古い電池の履歴は残し、在庫には戻しません。'
+          '\n新しい電池の交換目安日は未設定になります。',
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('戻る'),
+          ),
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('交換する'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final deviceIndex = devices.indexOf(usage);
+    final stockIndex = inventory.indexOf(selected);
+    if (deviceIndex < 0 || !devices[deviceIndex].isActive || stockIndex < 0 ||
+        inventory[stockIndex].quantity < usage.quantity) {
+      await loadHome();
+      return;
+    }
+    final now = DateTime.now();
+    final nextDevices = [...devices];
+    nextDevices[deviceIndex] = usage.finish(now);
+    nextDevices.add(DeviceUsage(
+      deviceName: usage.deviceName,
+      type: selected.type,
+      manufacturer: selected.manufacturer,
+      quantity: usage.quantity,
+      startedAt: now,
+      iconKey: usage.iconKey,
+    ));
+    final nextStock = [...inventory];
+    final remainder = selected.quantity - usage.quantity;
+    if (remainder == 0) {
+      nextStock.removeAt(stockIndex);
+    } else {
+      nextStock[stockIndex] = BatteryEntry(
+        type: selected.type,
+        manufacturer: selected.manufacturer,
+        quantity: remainder,
+        location: selected.location,
+        chemistry: selected.chemistry,
+      );
+    }
+    try {
+      // 端末内保存は2つのキーなので、失敗時は使用履歴を戻すよう試みる
+      await LocalBatteryStore.saveDevices(nextDevices);
+      try {
+        await LocalBatteryStore.saveInventory(nextStock);
+      } catch (_) {
+        await LocalBatteryStore.saveDevices(devices);
+        rethrow;
+      }
+      if (!mounted) return;
+      setState(() {
+        devices = nextDevices;
+        inventory = nextStock;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      await showError(context, '電池の交換を保存できませんでした\n$error');
+      await loadHome();
+    }
+  }
+
   Future<void> finishUsage(DeviceUsage usage) async {
     final confirmed = await showCupertinoDialog<bool>(
       context: context,
@@ -582,11 +979,6 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final activeDevices = devices.where((item) => item.isActive).toList();
-    final usingCount = activeDevices.fold<int>(
-      0, (sum, item) => sum + item.quantity,
-    );
-    final deviceCount = activeDevices.map((e) => e.deviceName).toSet().length;
-
     return CupertinoPageScaffold(
       backgroundColor: cream,
       child: SafeArea(
@@ -610,132 +1002,141 @@ class _HomePageState extends State<HomePage> {
                             ],
                           ),
                         ),
-                        const SizedBox(height: 38),
-                        Row(
-                          children: [
-                            const Expanded(
-                              child: Text('使用中の電池',
-                                  style: TextStyle(
-                                      color: ink,
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w700)),
-                            ),
-                          ],
+                        const SizedBox(height: 36),
+                        const Text(
+                          '使用中の機器',
+                          style: TextStyle(
+                            color: ink,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            _CountPill(label: '機器', value: '$deviceCount 台'),
-                            const SizedBox(width: 9),
-                            _CountPill(label: '使用中', value: '$usingCount 本'),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 19),
                         if (activeDevices.isEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 25),
-                            decoration: softCardDecoration(),
-                            child: const Column(
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 27),
+                            child: Column(
                               children: [
                                 Icon(CupertinoIcons.house_alt,
-                                    color: Color(0xFFC09A7D), size: 30),
-                                SizedBox(height: 10),
-                                Text('使用中の電池はありません',
+                                    color: const Color(0xFFC09A7D), size: 32),
+                                const SizedBox(height: 10),
+                                const Text('まだ使っている機器はないよ',
+                                    style: TextStyle(color: ink, fontSize: 14)),
+                                const SizedBox(height: 5),
+                                const Text('在庫棚から電池を選んで登録',
                                     style: TextStyle(
-                                        color: ink,
-                                        fontWeight: FontWeight.w600)),
-                                SizedBox(height: 6),
-                                Text('在庫棚の電池をタップして\n使う機器を登録',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                        color: mutedInk, fontSize: 13)),
+                                        color: mutedInk, fontSize: 12)),
                               ],
                             ),
                           )
                         else
-                          for (final usage in activeDevices)
-                            TweenAnimationBuilder<double>(
-                              key: ValueKey(
-                                  '${usage.startedAt.toIso8601String()}-${usage.deviceName}'),
-                              tween: Tween<double>(begin: 0, end: 1),
-                              duration: const Duration(milliseconds: 700),
-                              curve: Curves.easeOutCubic,
-                              builder: (context, value, child) => Opacity(
-                                opacity: value,
-                                child: Transform.translate(
-                                  offset: Offset(0, (1 - value) * 24),
-                                  child: child,
-                                ),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: Container(
-                                  padding:
-                                      const EdgeInsets.fromLTRB(14, 13, 10, 13),
-                                  decoration: softCardDecoration(),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        width: 43,
-                                        height: 43,
-                                        alignment: Alignment.center,
-                                        decoration: BoxDecoration(
-                                          color: paleCoral,
-                                          borderRadius:
-                                              BorderRadius.circular(14),
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final columns = constraints.maxWidth < 300 ? 2 : 3;
+                              const spacing = 12.0;
+                              final tileWidth =
+                                  (constraints.maxWidth - (columns - 1) * spacing) /
+                                      columns;
+                              return Wrap(
+                                spacing: spacing,
+                                runSpacing: 15,
+                                children: [
+                                  for (final usage in activeDevices)
+                                    SizedBox(
+                                      width: tileWidth,
+                                      child: TweenAnimationBuilder<double>(
+                                        key: ValueKey(
+                                          'device-${usage.startedAt.toIso8601String()}-${usage.deviceName}',
                                         ),
-                                        child: Icon(
-                                          resolvedDeviceIcon(usage.iconKey).icon,
-                                          color: coral,
-                                          size: 25,
+                                        tween: Tween<double>(begin: 0, end: 1),
+                                        duration:
+                                            const Duration(milliseconds: 570),
+                                        curve: Curves.easeOutCubic,
+                                        builder: (context, value, child) =>
+                                            Opacity(
+                                          opacity: value,
+                                          child: Transform.translate(
+                                            offset: Offset(0, (1 - value) * 15),
+                                            child: child,
+                                          ),
+                                        ),
+                                        child: CupertinoButton(
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 8, horizontal: 0),
+                                          onPressed: () =>
+                                              openDeviceActions(usage),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                               // アイコンの絵柄はそのまま。右上に交換目安のバッジ。
+                                               SizedBox(
+                                                 width: 82,
+                                                 height: 85,
+                                                 child: Stack(
+                                                   clipBehavior: Clip.none,
+                                                   children: [
+                                                     Positioned(
+                                                       left: 1,
+                                                       bottom: 0,
+                                                       child: Container(
+                                                         width: 80,
+                                                         height: 80,
+                                                         alignment: Alignment.center,
+                                                         decoration: BoxDecoration(
+                                                           color: paleCoral,
+                                                           borderRadius:
+                                                               BorderRadius.circular(25),
+                                                           border: Border.all(
+                                                             color: const Color(0xFFF0CCC5),
+                                                           ),
+                                                         ),
+                                                         child: Icon(
+                                                           resolvedDeviceIcon(usage.iconKey).icon,
+                                                           color: coral,
+                                                           size: 39,
+                                                         ),
+                                                       ),
+                                                     ),
+                                                     Positioned(
+                                                       top: -7,
+                                                       right: -8,
+                                                       child: _ManualReplacementBadge(
+                                                         target: usage.manualReplacementAt,
+                                                       ),
+                                                     ),
+                                                   ],
+                                                 ),
+                                               ),
+                                              const SizedBox(height: 9),
+                                              Text(
+                                                usage.deviceName,
+                                                textAlign: TextAlign.center,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  color: ink,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w600,
+                                                  height: 1.3,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(usage.deviceName,
-                                                style: const TextStyle(
-                                                    color: ink,
-                                                    fontSize: 16,
-                                                    fontWeight:
-                                                        FontWeight.w700)),
-                                            const SizedBox(height: 3),
-                                            Text(
-                                                '${usage.type}・${usage.quantity}本・${usage.manufacturer}',
-                                                style: const TextStyle(
-                                                    color: mutedInk,
-                                                    fontSize: 12)),
-                                            const SizedBox(height: 3),
-                                            Text(_elapsedLabel(usage.startedAt),
-                                                style: const TextStyle(
-                                                    color: mutedInk,
-                                                    fontSize: 12)),
-                                          ],
-                                        ),
-                                      ),
-                                      CupertinoButton(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 8),
-                                        onPressed: () => finishUsage(usage),
-                                        child: const Text('使用終了',
-                                            style: TextStyle(
-                                                color: coral, fontSize: 12)),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                        const SizedBox(height: 10),
-                        const Text(
-                          '※ 使用本数と開始日を記録しています。電池の残寿命の予測は今後追加予定です。',
-                          style: TextStyle(color: mutedInk, fontSize: 11),
-                        ),
-                        const SizedBox(height: 20),
+                                    ),
+                                ],
+                              );
+                            },
+                          ),
+                        if (activeDevices.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          const Text(
+                            '※ 色は設定した交換目安日による表示です。電池の残量ではありません。',
+                            style: TextStyle(color: mutedInk, fontSize: 11),
+                          ),
+                        ],
+                        const SizedBox(height: 25),
                       ]),
                     ),
                   ),
@@ -744,30 +1145,6 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-
-  String _elapsedLabel(DateTime start) {
-    final days = DateTime.now().difference(start).inDays;
-    if (days <= 0) return '今日から使用';
-    return '使い始めて $days 日';
-  }
-}
-
-class _CountPill extends StatelessWidget {
-  const _CountPill({required this.label, required this.value});
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
-        decoration: BoxDecoration(
-          color: paleCoral,
-          borderRadius: BorderRadius.circular(13),
-        ),
-        child: Text('$label  $value',
-            style: const TextStyle(
-                color: ink, fontSize: 13, fontWeight: FontWeight.w600)),
-      );
 }
 
 // ホームの在庫棚アイコン
@@ -791,13 +1168,6 @@ class _InventoryAppShortcut extends StatelessWidget {
               color: const Color(0xFFF1E1D0),
               borderRadius: BorderRadius.circular(29),
               border: Border.all(color: const Color(0xFFE6D6C4)),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x17573C25),
-                  blurRadius: 15,
-                  offset: Offset(0, 6),
-                ),
-              ],
             ),
             child: const Center(
               child: Row(
@@ -846,10 +1216,6 @@ class _DisposalAppShortcut extends StatelessWidget {
                 color: const Color(0xFFE2E9DD),
                 borderRadius: BorderRadius.circular(29),
                 border: Border.all(color: const Color(0xFFCEDCCB)),
-                boxShadow: const [
-                  BoxShadow(color: Color(0x17573C25),
-                      blurRadius: 15, offset: Offset(0, 6)),
-                ],
               ),
               child: Center(
                 child: Stack(
@@ -1490,6 +1856,7 @@ class _InventoryPageState extends State<InventoryPage> {
         quantity: request.quantity,
         startedAt: DateTime.now(),
         iconKey: request.iconKey,
+        manualReplacementAt: request.manualReplacementAt,
       ),
     ];
 
@@ -2241,10 +2608,12 @@ class UseBatteryRequest {
     required this.deviceName,
     required this.quantity,
     required this.iconKey,
+    this.manualReplacementAt,
   });
   final String deviceName;
   final int quantity;
   final String iconKey;
+  final DateTime? manualReplacementAt;
 }
 
 // 電池を使う機器の登録画面
@@ -2264,6 +2633,15 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
   String? iconKey; // 未選択
   String? error;
   String? historyHint;
+  DateTime? manualReplacementAt;
+
+  Future<void> chooseManualReplacementDate() async {
+    final chosen = await pickManualReplacementDate(
+      context, current: manualReplacementAt,
+    );
+    if (!mounted || chosen == null) return;
+    setState(() => manualReplacementAt = chosen);
+  }
 
   @override
   void initState() {
@@ -2385,6 +2763,7 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
         deviceName: name,
         quantity: count,
         iconKey: iconKey!,
+        manualReplacementAt: manualReplacementAt,
       ),
     );
   }
@@ -2587,6 +2966,43 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
                   ),
                 ],
               ),
+              const SizedBox(height: 22),
+              const Text('交換の目安日（任意）', style: TextStyle(
+                  color: ink, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              CupertinoButton(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                color: paper,
+                borderRadius: BorderRadius.circular(14),
+                onPressed: chooseManualReplacementDate,
+                child: Row(
+                  children: [
+                    const Icon(CupertinoIcons.calendar, color: coral, size: 19),
+                    const SizedBox(width: 9),
+                    Expanded(child: Text(
+                      manualReplacementAt == null
+                          ? '設定せずに使う（後から設定できます）'
+                          : formatReplacementDate(manualReplacementAt!),
+                      style: const TextStyle(color: ink, fontSize: 13),
+                    )),
+                    const Icon(CupertinoIcons.chevron_right,
+                        color: mutedInk, size: 14),
+                  ],
+                ),
+              ),
+              if (manualReplacementAt != null)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: CupertinoButton(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                    onPressed: () => setState(() => manualReplacementAt = null),
+                    child: const Text('設定を解除',
+                        style: TextStyle(color: mutedInk, fontSize: 12)),
+                  ),
+                ),
+              const Text('設定した日付から緑・黄・赤の表示を切り替えます。'
+                  '電池の残量を測定する機能ではありません。',
+                  style: TextStyle(color: mutedInk, fontSize: 11, height: 1.5)),
               if (error != null) ...[
                 const SizedBox(height: 8),
                 Text(error!, style: const TextStyle(color: coral, fontSize: 12)),
@@ -2828,7 +3244,7 @@ Future<void> showError(BuildContext context, String message) {
   return showCupertinoDialog<void>(
     context: context,
     builder: (dialogContext) => CupertinoAlertDialog(
-      title: const Text('確認してね'),
+      title: const Text('確認してください'),
       content: Text(message),
       actions: [
         CupertinoDialogAction(
