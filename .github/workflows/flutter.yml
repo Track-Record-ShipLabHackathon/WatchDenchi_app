@@ -34,7 +34,12 @@ jobs:
         run: flutter pub get --enforce-lockfile
 
       - name: Build Flutter Web
-        run: flutter build web --no-pub --base-href /WatchDenchi_app/
+        run: >-
+          flutter build web
+          --no-pub
+          --base-href /WatchDenchi_app/
+          --dart-define=WATCHDENCHI_API_BASE_URL=https://watchdenchi-app.onrender.com
+          --dart-define=WATCHDENCHI_ENABLE_SERVER_AUTH=true
 
       - name: Upload site
         if: github.event_name == 'push'
