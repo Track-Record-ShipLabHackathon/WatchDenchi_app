@@ -6,11 +6,26 @@ import (
 	"github.com/Track-Record-ShipLabHackathon/WatchDenchi_app/BACK/health"
 
 	"os"
+
+	"database/sql"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
+	var db *sql.DB
+	databaseURL := os.Getenv("WATCHDENCHI_DATABASE_URL");
+	if  (databaseURL != "") {
+		var err error
+		db, err = sql.Open("pgx", databaseURL)
+		if (err != nil) {
+			log.Fatal("could not initialize PostgreSQL from WATCHDENCHI_DATABASE_URL")
+		}
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health.Liveness)
+	
+	mux.HandleFunc("GET /readyz", health.Readiness(db))
 
 	port := os.Getenv("PORT");
 	addr := "127.0.0.1:8080"

@@ -5,6 +5,8 @@
 
 ## アプリケーションアーキテクチャ
 
+システム設計録：https://battery-design-explorer.tweedygrape8.chatgpt.site
+
 Watch-Denchi_appは、Flutter・Go・PostgreSQLの３層アーキテクチャで構成される。
 
 - **Flutter**：プレゼンテーション層
@@ -19,7 +21,7 @@ flowchart TB
     Python["Python（☆2）<br/>推論SOA<br/>"]
 
     Flutter <-->|API| Go
-    Go <-->|SQL| DB
+    Go <-->|PGX| DB
     Go <-->|API| Python
 
     classDef frontend fill:#192b45,stroke:#4c89de,color:#fff
