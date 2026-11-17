@@ -9,6 +9,8 @@ import (
 
 	"database/sql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/Track-Record-ShipLabHackathon/WatchDenchi_app/BACK/handlers"
 )
 
 func main() {
@@ -26,6 +28,8 @@ func main() {
 	mux.HandleFunc("GET /healthz", health.Liveness)
 	
 	mux.HandleFunc("GET /readyz", health.Readiness(db))
+
+	mux.HandleFunc("POST /api/client", handlers.CreateClient(db))
 
 	port := os.Getenv("PORT");
 	addr := "127.0.0.1:8080"
