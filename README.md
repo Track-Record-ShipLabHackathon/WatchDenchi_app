@@ -60,9 +60,9 @@ WatchDenchi_app/
 │       ├── liveness_test.go            
 │       ├── readiness.go                         GET /readyz
 │       └── readiness_test.go           
-├── DB/migrations/                      ー PostgreSQL（データベース層）
+├── DB/                                 ー PostgreSQL（データベース層）
 ├── inference/                          ー Python（☆2：推論SOA）
-├── docs/                               # API仕様とシステム設計
+├── docs/                               
 ├── .github/workflows/                  ー CICD設定
 │   ├── flutter.yml                     
 │   └── go.yml                          
@@ -72,5 +72,5 @@ WatchDenchi_app/
 └── README.md                           
 ```
 
-- **CI**：`flutter.yml` は `FRONT/` でFlutterの静的解析・テストを実行します。`go.yml` は `BACK/` でGoのテスト・ビルドを実行し、`DB/migrations/` のSQLを使ってPostgreSQLとの接続も検証します。
+- **CI**：`flutter.yml` は `FRONT/` でFlutterの静的解析・テストを実行します。`go.yml` は `BACK/` でGoのテスト・ビルドを実行し、`DB/` のSQLを使ってPostgreSQLとの接続も検証します。
 - **CD**：
