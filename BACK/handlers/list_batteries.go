@@ -13,11 +13,12 @@ import (
 )
 
 type batteryListItem struct {
-	ID              int64  `json:"id"`
-	Type            string `json:"type"`
-	Manufacturer    string `json:"manufacturer"`
-	Quantity        int32  `json:"quantity"`
-	StorageLocation string `json:"storage_location"`
+	ID              int64     `json:"id"`
+	Type            string    `json:"type"`
+	Manufacturer    string    `json:"manufacturer"`
+	Quantity        int32     `json:"quantity"`
+	StorageLocation string    `json:"storage_location"`
+	RegistedAt      time.Time `json:"registed_at"`
 }
 
 func ListBatteries(db *sql.DB) http.HandlerFunc {
@@ -52,7 +53,7 @@ func ListBatteries(db *sql.DB) http.HandlerFunc {
 		}
 
 		const query = `
-			SELECT id, type, manufacturer, quantity, storage_location
+			SELECT id, type, manufacturer, quantity, storage_location, registed_at
 			FROM battery
 			WHERE client_id = $1
 			ORDER BY id
@@ -69,7 +70,7 @@ func ListBatteries(db *sql.DB) http.HandlerFunc {
 		for rows.Next() {
 			var item batteryListItem
 			if err := rows.Scan(&item.ID, &item.Type, &item.Manufacturer,
-				&item.Quantity, &item.StorageLocation); err != nil {
+			&item.Quantity, &item.StorageLocation, &item.RegistedAt); err != nil {
 				log.Printf("list batteries: scan: %v", err)
 				http.Error(w, "could not list batteries", http.StatusInternalServerError)
 				return
