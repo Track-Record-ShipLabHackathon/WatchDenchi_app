@@ -42,5 +42,5 @@ func main() {
 	}
 	
 	log.Printf("WatchDenchi API starting on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	log.Fatal(http.ListenAndServe(addr, withCORS(mux)))
 }
