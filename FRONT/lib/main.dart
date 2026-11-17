@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/anonymous_session.dart';
+import 'services/watchdenchi_api.dart';
 
 // アプリの色と選択肢
 const Color cream = Color(0xFFF5EFE5);
@@ -282,6 +283,14 @@ class DeviceUsage {
       );
 }
 
+// APIの☆1登録・一覧を安全に動作確認するための試験フラグ。
+// 移動・使用・交換を更新するサーバーAPIができるまでは本番ではfalse。
+// ローカルの在庫は消さず、試験モードではサーバー側のみ表示する。
+const bool enableServerInventory = bool.fromEnvironment(
+  'WATCHDENCHI_ENABLE_SERVER_INVENTORY',
+  defaultValue: false,
+);
+
 // 同じ端末内で在庫と機器の使用履歴を別々に保存
 class LocalBatteryStore {
   LocalBatteryStore._();
@@ -293,6 +302,20 @@ class LocalBatteryStore {
   static const String disposalKey = 'watchdenchi_disposal_schedule_v1';
 
   static Future<List<BatteryEntry>> readInventory() async {
+    if (enableServerInventory) {
+      await WatchDenchiServerServices.auth.restoreOrCreate();
+      final remote = await WatchDenchiServerServices.api.getBatteries();
+      // DBのchemistry列はまだ設計されていない。推測せず「不明」にする。
+      return remote.where((battery) => battery.quantity > 0).map((battery) =>
+        BatteryEntry(
+          type: battery.type,
+          manufacturer: battery.manufacturer,
+          quantity: battery.quantity,
+          location: battery.storageLocation,
+          chemistry: battery.chemistry ?? '不明',
+        ),
+      ).toList(growable: false);
+    }
     final saved = await _prefs.getString(inventoryKey) ??
         await _prefs.getString(olderInventoryKey);
     if (saved == null) return [];
@@ -305,6 +328,10 @@ class LocalBatteryStore {
   }
 
   static Future<void> saveInventory(List<BatteryEntry> entries) async {
+    // サーバー在庫モードでローカルだけ書き換えると、本数が矛盾するため防ぐ。
+    if (enableServerInventory) {
+      throw StateError('サーバーへの在庫更新APIが未実装です');
+    }
     await _prefs.setString(
       inventoryKey,
       jsonEncode(entries.map((entry) => entry.toJson()).toList()),
@@ -817,6 +844,10 @@ class _HomePageState extends State<HomePage> {
 
   // 新しい電池を在庫棚から選び、同じ機器の使用履歴を継続する
   Future<void> chooseReplacement(DeviceUsage usage) async {
+    if (enableServerInventory) {
+      await showError(context, '交換時の在庫更新APIがまだないため、サーバー接続テスト中は交換できません');
+      return;
+    }
     final choices = inventory
         .where((entry) => entry.type == usage.type)
         .toList();
@@ -1738,6 +1769,33 @@ class _InventoryPageState extends State<InventoryPage> {
     );
     if (!mounted || newEntry == null) return;
 
+    if (enableServerInventory) {
+      if (newEntry.location.trim().isEmpty) {
+        await showError(context, 'サーバー保存には保管場所の入力が必要です');
+        return;
+      }
+      try {
+        await WatchDenchiServerServices.auth.restoreOrCreate();
+        // POSTに成功した後だけGETし直す。タイムアウト時に自動再送しない。
+        await WatchDenchiServerServices.api.registerBattery(
+          BatteryCreateRequest(
+            type: newEntry.type,
+            manufacturer: newEntry.manufacturer,
+            quantity: newEntry.quantity,
+            storageLocation: newEntry.location,
+          ),
+        );
+        final refreshed = await LocalBatteryStore.readInventory();
+        if (!mounted) return;
+        setState(() => entries = refreshed);
+      } catch (error) {
+        if (!mounted) return;
+        await showError(context,
+            'サーバー登録・更新確認に失敗しました。二重登録を避けるため、再登録前に在庫を確認してね。\n$error');
+      }
+      return;
+    }
+
     final updated = [...entries];
     final i = updated.indexWhere((entry) =>
         entry.type == newEntry.type &&
@@ -1768,6 +1826,10 @@ class _InventoryPageState extends State<InventoryPage> {
   }
 
   Future<void> moveBattery(BatteryEntry entry) async {
+    if (enableServerInventory) {
+      await showError(context, '保管場所の移動APIがまだないため、サーバー接続テスト中は移動できません');
+      return;
+    }
     final request = await Navigator.of(context).push<MoveBatteryRequest>(
       CupertinoPageRoute<MoveBatteryRequest>(
         builder: (_) => MoveBatteryPage(entry: entry),
@@ -1831,6 +1893,10 @@ class _InventoryPageState extends State<InventoryPage> {
   }
 
   Future<void> useBattery(BatteryEntry entry) async {
+    if (enableServerInventory) {
+      await showError(context, '使用情報のAPIがまだないため、サーバー接続テスト中は電池を使用できません');
+      return;
+    }
     final request = await showCupertinoModalPopup<UseBatteryRequest>(
       context: context,
       builder: (_) => UseBatterySheet(entry: entry),
