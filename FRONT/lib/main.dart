@@ -74,23 +74,44 @@ class _SplashPageState extends State<SplashPage>
   }
 
   Future<void> _prepareAndEnter() async {
-    
+    // 初回のみ地域設定画面に進む。すでに保存済みの地域は再入力させない。
     final introDuration = Future<void>.delayed(const Duration(milliseconds: 3000));
+    var needsRegionSetup = true;
     try {
       await Future.wait<Object?>([
         LocalBatteryStore.readInventory(),
         LocalBatteryStore.readDevices(),
-        // GoのAPIが未完成の間はデフォルトで無効。ローカル保存を守る。
         if (enableServerAnonymousAuth)
           WatchDenchiServerServices.auth.restoreOrCreate(),
       ]);
     } catch (error) {
       debugPrint('起動時のデータ確認に失敗: $error');
     }
+    try {
+      final saved = await LocalBatteryStore.readDisposalSchedule();
+      final oldRegion = DisposalAreaCatalog.findMunicipality(
+        saved['municipalityCode'] as String?,
+        saved['municipality'] as String?,
+      );
+      final hasSkipped = await LocalBatteryStore.hasSeenRegionSetup();
+      needsRegionSetup = oldRegion == null && !hasSkipped;
+    } catch (error) {
+      debugPrint('地域の初回設定確認に失敗: $error');
+    }
+    // 既存データがある開発端末で、初回画面を確認するための任意フラグ。
+    // 通常起動・本番ビルドではfalse。
+    const previewRegionSetup = bool.fromEnvironment(
+      'WATCHDENCHI_PREVIEW_REGION_SETUP', defaultValue: false,
+    );
+    if (kDebugMode && previewRegionSetup) needsRegionSetup = true;
     await introDuration;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      CupertinoPageRoute<void>(builder: (_) => const HomePage()),
+      CupertinoPageRoute<void>(
+        builder: (_) => needsRegionSetup
+            ? const RegionSetupPage()
+            : const MainTabsPage(),
+      ),
     );
   }
 
@@ -292,6 +313,13 @@ class LocalBatteryStore {
   static const String olderInventoryKey = 'battery_inventory_v1';
   static const String deviceKey = 'watchdenchi_device_usage_v1';
   static const String disposalKey = 'watchdenchi_disposal_schedule_v1';
+  static const String regionSetupSeenKey = 'watchdenchi_region_setup_seen_v1';
+
+  static Future<bool> hasSeenRegionSetup() async =>
+      await _prefs.getBool(regionSetupSeenKey) ?? false;
+
+  static Future<void> markRegionSetupSeen() async =>
+      _prefs.setBool(regionSetupSeenKey, true);
 
   static Future<List<BatteryEntry>> readInventory() async {
     final saved = await _prefs.getString(inventoryKey) ??
@@ -341,10 +369,17 @@ class LocalBatteryStore {
   }
 
   static Future<void> saveDisposalSchedule(
-    String municipality, Map<String, DateTime> dates,
-  ) async {
+    String municipality,
+    Map<String, DateTime> dates, {
+    String? municipalityCode,
+    String? district,
+    String? districtCode,
+  }) async {
     await _prefs.setString(disposalKey, jsonEncode({
       'municipality': municipality,
+      'municipalityCode': municipalityCode,
+      'district': district,
+      'districtCode': districtCode,
       'dates': dates.map(
         (key, value) => MapEntry(key, value.toIso8601String()),
       ),
@@ -690,6 +725,369 @@ PageRouteBuilder<T> softPageRoute<T>(Widget page) => PageRouteBuilder<T>(
       },
     );
 
+// -----------------------------------------------------------------------------
+// ホームの下部に常時表示するタブ: 在庫棚 / 機器 / 回収日
+// タブの選択はページ遷移ではなく IndexedStack で行うため、タブ状態を保持する。
+// 新規の画像アセットや pubspec の追記なしで動くよう、ユーザー指定アイコンを
+// 背景透明化・縮小した画像データとしてここに直接含めている。
+// -----------------------------------------------------------------------------
+const String _watchDenchiTvPngBase64 =
+    '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';
+const String _watchDenchiCalendarPngBase64 =
+    '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';
+
+class MainTabsPage extends StatefulWidget {
+  const MainTabsPage({super.key});
+
+  @override
+  State<MainTabsPage> createState() => _MainTabsPageState();
+}
+
+class _MainTabsPageState extends State<MainTabsPage> {
+  int _selectedIndex = 1; // 初期状態は中央の「機器」タブ。
+  final GlobalKey<_InventoryPageState> _inventoryKey =
+      GlobalKey<_InventoryPageState>();
+  final GlobalKey<_HomePageState> _homeKey = GlobalKey<_HomePageState>();
+  final GlobalKey<_DisposalPageState> _disposalKey =
+      GlobalKey<_DisposalPageState>();
+
+  void _selectTab(int nextIndex) {
+    if (_selectedIndex == nextIndex) return;
+    setState(() => _selectedIndex = nextIndex);
+    // 戻ってきたタブはデータを読み直す。電池の追加/使用/交換が反映される。
+    if (nextIndex == 0) {
+      _inventoryKey.currentState?.loadEntries();
+    } else if (nextIndex == 1) {
+      _homeKey.currentState?.loadHome();
+    } else if (nextIndex == 2) {
+      _disposalKey.currentState?.loadSchedule();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      backgroundColor: cream,
+      child: Column(
+        children: [
+          Expanded(
+            child: IndexedStack(
+              index: _selectedIndex,
+              children: [
+                InventoryPage(key: _inventoryKey),
+                HomePage(key: _homeKey),
+                DisposalPage(key: _disposalKey),
+              ],
+            ),
+          ),
+          // テキスト入力時はキーボードの後ろにタブを出さない。
+          if (MediaQuery.of(context).viewInsets.bottom == 0)
+            _WatchDenchiTabBar(
+              selectedIndex: _selectedIndex,
+              onSelected: _selectTab,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WatchDenchiTabBar extends StatelessWidget {
+  const _WatchDenchiTabBar({
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  static final MemoryImage _tvPng =
+      MemoryImage(base64Decode(_watchDenchiTvPngBase64));
+  static final MemoryImage _calendarPng =
+      MemoryImage(base64Decode(_watchDenchiCalendarPngBase64));
+
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  Widget _tab({
+    required int index,
+    required String label,
+    required Widget icon,
+  }) {
+    final active = selectedIndex == index;
+    return Expanded(
+      child: Semantics(
+        label: '$label タブ',
+        selected: active,
+        button: true,
+        child: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: () => onSelected(index),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            constraints: const BoxConstraints(minHeight: 78),
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 8),
+            decoration: BoxDecoration(
+              color: active
+                  ? const Color(0xFFE1EEDA)
+                  : const Color(0x00FFFFFF),
+              borderRadius: BorderRadius.circular(25),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(height: 43, child: Center(child: icon)),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: active ? const Color(0xFF527A60) : ink,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 3, 12, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+        decoration: BoxDecoration(
+          color: paper,
+          borderRadius: BorderRadius.circular(32),
+          border: Border.all(color: const Color(0xFFF1E7DA)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x16997B61),
+              blurRadius: 18,
+              offset: Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            _tab(
+              index: 0,
+              label: '在庫棚',
+              icon: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SoftBattery(manufacturer: 'maxell', size: 39),
+                  SizedBox(width: 3),
+                  SoftBattery(manufacturer: 'Panasonic', size: 39),
+                ],
+              ),
+            ),
+            _tab(
+              index: 1,
+              label: '機器',
+              icon: Image(
+                image: _tvPng,
+                width: 51,
+                height: 42,
+                fit: BoxFit.contain,
+                gaplessPlayback: true,
+              ),
+            ),
+            _tab(
+              index: 2,
+              label: '回収日',
+              icon: Image(
+                image: _calendarPng,
+                width: 51,
+                height: 42,
+                fit: BoxFit.contain,
+                gaplessPlayback: true,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ホーム画面・使用中の電池
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -724,20 +1122,6 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       setState(() => loading = false);
     }
-  }
-
-  Future<void> openInventory() async {
-    await Navigator.of(context).push<void>(
-      softPageRoute<void>(const InventoryPage()),
-    );
-    if (!mounted) return;
-    await loadHome();
-  }
-
-  Future<void> openDisposal() async {
-    await Navigator.of(context).push<void>(
-      softPageRoute<void>(const DisposalPage()),
-    );
   }
 
   // 使用中のアイコンをタップしたときだけ操作を表示
@@ -996,27 +1380,6 @@ class _HomePageState extends State<HomePage> {
                     padding: const EdgeInsets.fromLTRB(24, 30, 24, 0),
                     sliver: SliverList(
                       delegate: SliverChildListDelegate([
-                        // 在庫棚のショートカット
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Wrap(
-                            spacing: 20,
-                            runSpacing: 16,
-                            children: [
-                              _InventoryAppShortcut(onPressed: openInventory),
-                              _DisposalAppShortcut(onPressed: openDisposal),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 36),
-                        const Text(
-                          '使用中の機器',
-                          style: TextStyle(
-                            color: ink,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
                         const SizedBox(height: 19),
                         if (activeDevices.isEmpty)
                           Padding(
@@ -1137,10 +1500,6 @@ class _HomePageState extends State<HomePage> {
                           ),
                         if (activeDevices.isNotEmpty) ...[
                           const SizedBox(height: 10),
-                          const Text(
-                            '※ 色は設定した交換目安日による表示です。電池の残量ではありません。',
-                            style: TextStyle(color: mutedInk, fontSize: 11),
-                          ),
                         ],
                         const SizedBox(height: 25),
                       ]),
@@ -1153,101 +1512,447 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// ホームの在庫棚アイコン
-class _InventoryAppShortcut extends StatelessWidget {
-  const _InventoryAppShortcut({required this.onPressed});
+// -----------------------------------------------------------------------------
+// 地域検索の候補データ。市町村と収集地区は別々に検索・選択する。
+// 市町村候補 = 沖縄県の行政区分 (処分データの対応状況を示すものではない)。
+// 収集地区候補 = 武ちゃんの確認済みデータを後から追加する場所。
+// 架空の地区や収集日を表示しない。
+// -----------------------------------------------------------------------------
+class DisposalAreaOption {
+  const DisposalAreaOption(this.code, this.name, this.reading);
 
-  final VoidCallback onPressed;
+  final String code;
+  final String name;
+  final String reading;
 
-  @override
-  Widget build(BuildContext context) {
-    return CupertinoButton(
-      padding: EdgeInsets.zero,
-      onPressed: onPressed,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 118,
-            height: 118,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1E1D0),
-              borderRadius: BorderRadius.circular(29),
-              border: Border.all(color: const Color(0xFFE6D6C4)),
-            ),
-            child: const Center(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  SoftBattery(manufacturer: 'maxell', size: 76),
-                  SizedBox(width: 3),
-                  SoftBattery(manufacturer: 'Panasonic', size: 76),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            '在庫棚',
-            style: TextStyle(
-              color: ink,
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
+  bool matches(String input) {
+    final q = input.replaceAll(RegExp(r'[\s　]'), '').toLowerCase();
+    if (q.isEmpty) return true;
+    return name.replaceAll('　', '').toLowerCase().contains(q) ||
+        reading.replaceAll('　', '').toLowerCase().contains(q);
   }
 }
 
-// ホームの捨て方アイコン
-class _DisposalAppShortcut extends StatelessWidget {
-  const _DisposalAppShortcut({required this.onPressed});
+class DisposalAreaCatalog {
+  DisposalAreaCatalog._();
 
-  final VoidCallback onPressed;
+  // 沖縄県の41市町村。codeは市区町村コード。
+  static const List<DisposalAreaOption> municipalities = [
+    DisposalAreaOption('47201', '那覇市', 'なはし'),
+    DisposalAreaOption('47205', '宜野湾市', 'ぎのわんし'),
+    DisposalAreaOption('47207', '石垣市', 'いしがきし'),
+    DisposalAreaOption('47208', '浦添市', 'うらそえし'),
+    DisposalAreaOption('47209', '名護市', 'なごし'),
+    DisposalAreaOption('47210', '糸満市', 'いとまんし'),
+    DisposalAreaOption('47211', '沖縄市', 'おきなわし'),
+    DisposalAreaOption('47212', '豊見城市', 'とみぐすくし'),
+    DisposalAreaOption('47213', 'うるま市', 'うるまし'),
+    DisposalAreaOption('47214', '宮古島市', 'みやこじまし'),
+    DisposalAreaOption('47215', '南城市', 'なんじょうし'),
+    DisposalAreaOption('47301', '国頭村', 'くにがみそん'),
+    DisposalAreaOption('47302', '大宜味村', 'おおぎみそん'),
+    DisposalAreaOption('47303', '東村', 'ひがしそん'),
+    DisposalAreaOption('47306', '今帰仁村', 'なきじんそん'),
+    DisposalAreaOption('47308', '本部町', 'もとぶちょう'),
+    DisposalAreaOption('47311', '恩納村', 'おんなそん'),
+    DisposalAreaOption('47313', '宜野座村', 'ぎのざそん'),
+    DisposalAreaOption('47314', '金武町', 'きんちょう'),
+    DisposalAreaOption('47315', '伊江村', 'いえそん'),
+    DisposalAreaOption('47324', '読谷村', 'よみたんそん'),
+    DisposalAreaOption('47325', '嘉手納町', 'かでなちょう'),
+    DisposalAreaOption('47326', '北谷町', 'ちゃたんちょう'),
+    DisposalAreaOption('47327', '北中城村', 'きたなかぐすくそん'),
+    DisposalAreaOption('47328', '中城村', 'なかぐすくそん'),
+    DisposalAreaOption('47329', '西原町', 'にしはらちょう'),
+    DisposalAreaOption('47348', '与那原町', 'よなばるちょう'),
+    DisposalAreaOption('47350', '南風原町', 'はえばるちょう'),
+    DisposalAreaOption('47353', '渡嘉敷村', 'とかしきそん'),
+    DisposalAreaOption('47354', '座間味村', 'ざまみそん'),
+    DisposalAreaOption('47355', '粟国村', 'あぐにそん'),
+    DisposalAreaOption('47356', '渡名喜村', 'となきそん'),
+    DisposalAreaOption('47357', '南大東村', 'みなみだいとうそん'),
+    DisposalAreaOption('47358', '北大東村', 'きただいとうそん'),
+    DisposalAreaOption('47359', '伊平屋村', 'いへやそん'),
+    DisposalAreaOption('47360', '伊是名村', 'いぜなそん'),
+    DisposalAreaOption('47361', '久米島町', 'くめじまちょう'),
+    DisposalAreaOption('47362', '八重瀬町', 'やえせちょう'),
+    DisposalAreaOption('47375', '多良間村', 'たらまそん'),
+    DisposalAreaOption('47381', '竹富町', 'たけとみちょう'),
+    DisposalAreaOption('47382', '与那国町', 'よなぐにちょう'),
+  ];
+
+  // TODO(地域データ): 武ちゃんの取得結果をここに差し込む。
+  // キーは上の市町村コード。値はその市町村の収集地区候補。
+  // 例のダミー地区は登録しない。確認できた正式な地区のみ追加する。
+  // データ形式: '47201': [DisposalAreaOption('地区ID', '地区名', 'ふりがな')],
+  static const Map<String, List<DisposalAreaOption>> districtsByCityCode = {};
+
+  static List<DisposalAreaOption> search(
+      List<DisposalAreaOption> options, String query) {
+    return options.where((item) => item.matches(query)).take(6).toList();
+  }
+
+  static List<DisposalAreaOption> districtsFor(String cityCode) =>
+      districtsByCityCode[cityCode] ?? const <DisposalAreaOption>[];
+
+  static DisposalAreaOption? findMunicipality(String? code, String? name) {
+    for (final item in municipalities) {
+      if (code != null && code == item.code) return item;
+      if (code == null && name == item.name) return item;
+    }
+    return null;
+  }
+}
+
+// 初回起動時の地域登録画面。日程・分別のダミーデータは生成しない。
+// 市町村候補は固定リスト、収集地区はあとから武ちゃんの確定データを追加する。
+class RegionSetupPage extends StatefulWidget {
+  const RegionSetupPage({super.key});
 
   @override
-  Widget build(BuildContext context) => CupertinoButton(
-        padding: EdgeInsets.zero,
-        onPressed: onPressed,
+  State<RegionSetupPage> createState() => _RegionSetupPageState();
+}
+
+class _RegionSetupPageState extends State<RegionSetupPage> {
+  final TextEditingController _cityController = TextEditingController();
+  final TextEditingController _districtController = TextEditingController();
+  final FocusNode _cityFocus = FocusNode();
+  final FocusNode _districtFocus = FocusNode();
+  DisposalAreaOption? _city;
+  DisposalAreaOption? _district;
+  bool _showCityCandidates = false;
+  bool _showDistrictCandidates = false;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _cityController.dispose();
+    _districtController.dispose();
+    _cityFocus.dispose();
+    _districtFocus.dispose();
+    super.dispose();
+  }
+
+  void _chooseCity(DisposalAreaOption city) {
+    setState(() {
+      _city = city;
+      _district = null;
+      _cityController.text = city.name;
+      _districtController.clear();
+      _showCityCandidates = false;
+      _showDistrictCandidates = false;
+      _error = null;
+    });
+    _cityFocus.unfocus();
+  }
+
+  void _chooseDistrict(DisposalAreaOption district) {
+    setState(() {
+      _district = district;
+      _districtController.text = district.name;
+      _showDistrictCandidates = false;
+      _error = null;
+    });
+    _districtFocus.unfocus();
+  }
+
+  void _enterHome() {
+    Navigator.of(context).pushReplacement(
+      CupertinoPageRoute<void>(builder: (_) => const MainTabsPage()),
+    );
+  }
+
+  Future<void> _registerRegion() async {
+    final city = _city;
+    if (city == null || _cityController.text.trim() != city.name) {
+      setState(() => _error = '候補をタップして市町村を選んでね');
+      return;
+    }
+    final districts = DisposalAreaCatalog.districtsFor(city.code);
+    if (districts.isNotEmpty &&
+        (_district == null ||
+            _districtController.text.trim() != _district!.name)) {
+      setState(() => _error = '候補をタップして収集地区を選んでね');
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      // 回収日は未登録。自治体の正式データが届くまで推測しない。
+      await LocalBatteryStore.saveDisposalSchedule(
+        city.name,
+        const <String, DateTime>{},
+        municipalityCode: city.code,
+        district: _district?.name,
+        districtCode: _district?.code,
+      );
+      await LocalBatteryStore.markRegionSetupSeen();
+      if (!mounted) return;
+      _enterHome();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = '地域を保存できませんでした。もう一度試してね。';
+      });
+    }
+  }
+
+  Future<void> _skip() async {
+    setState(() => _saving = true);
+    try {
+      await LocalBatteryStore.markRegionSetupSeen();
+      if (!mounted) return;
+      _enterHome();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = '設定を保存できませんでした。もう一度試してね。';
+      });
+    }
+  }
+
+  Widget _suggestions(
+    List<DisposalAreaOption> options,
+    void Function(DisposalAreaOption) onSelect,
+  ) => Container(
+        margin: const EdgeInsets.only(top: 7),
+        decoration: BoxDecoration(
+          color: paper,
+          border: Border.all(color: const Color(0xFFE6D9C8)),
+          borderRadius: BorderRadius.circular(15),
+        ),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 118,
-              height: 118,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE2E9DD),
-                borderRadius: BorderRadius.circular(29),
-                border: Border.all(color: const Color(0xFFCEDCCB)),
-              ),
-              child: Center(
-                child: Stack(
-                  alignment: Alignment.center,
+            for (var i = 0; i < options.length; i++) ...[
+              if (i > 0)
+                Container(height: 1, color: const Color(0xFFF0E6DA)),
+              CupertinoButton(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 15, vertical: 12),
+                onPressed: () => onSelect(options[i]),
+                child: Row(
                   children: [
-                    const Icon(CupertinoIcons.calendar,
-                        color: Color(0xFF7A9581), size: 61),
-                    Positioned(
-                      right: 21,
-                      bottom: 19,
-                      child: Transform.rotate(
-                        angle: 0.18,
-                        child: const SoftBattery(
-                            manufacturer: 'maxell', size: 49),
-                      ),
+                    const Icon(CupertinoIcons.location,
+                        color: coral, size: 19),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(options[i].name,
+                          style: const TextStyle(
+                              color: ink,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600)),
                     ),
+                    const Icon(CupertinoIcons.chevron_right,
+                        color: mutedInk, size: 15),
                   ],
                 ),
               ),
-            ),
-            const SizedBox(height: 10),
-            const Text('電池の捨て方', style: TextStyle(
-                color: ink, fontSize: 15, fontWeight: FontWeight.w700)),
+            ],
           ],
         ),
       );
+
+  @override
+  Widget build(BuildContext context) {
+    final cityOptions = DisposalAreaCatalog.search(
+        DisposalAreaCatalog.municipalities, _cityController.text);
+    final districts = _city == null
+        ? const <DisposalAreaOption>[]
+        : DisposalAreaCatalog.districtsFor(_city!.code);
+    final districtOptions = DisposalAreaCatalog.search(
+        districts, _districtController.text);
+    final canRegister = _city != null &&
+        _cityController.text.trim() == _city!.name &&
+        (districts.isEmpty ||
+            (_district != null &&
+                _districtController.text.trim() == _district!.name));
+
+    return CupertinoPageScaffold(
+      backgroundColor: cream,
+      navigationBar: const CupertinoNavigationBar(
+        backgroundColor: cream,
+        border: null,
+        middle: Text('はじめに', style: TextStyle(color: ink)),
+      ),
+      child: SafeArea(
+        child: ListView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.fromLTRB(24, 25, 24, 40),
+          children: [
+            Container(
+              width: 70,
+              height: 70,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3DDD3),
+                borderRadius: BorderRadius.circular(21),
+              ),
+              child: const Icon(CupertinoIcons.location_solid,
+                  color: coral, size: 34),
+            ),
+            const SizedBox(height: 22),
+            const Text('お住まいの地域を教えてね',
+                style: TextStyle(
+                    fontSize: 24, fontWeight: FontWeight.w800, color: ink)),
+            const SizedBox(height: 9),
+            const Text('電池の捨て方を地域に合わせて案内するため、\nまずは市町村を登録しよう。',
+                style: TextStyle(color: mutedInk, fontSize: 14, height: 1.55)),
+            const SizedBox(height: 28),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 15),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3E8DB),
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: const Row(
+                children: [
+                  Icon(CupertinoIcons.location_solid,
+                      color: coral, size: 19),
+                  SizedBox(width: 10),
+                  Expanded(child: Text('沖縄県', style: TextStyle(
+                      color: ink, fontWeight: FontWeight.w700))),
+                  Icon(CupertinoIcons.lock, color: mutedInk, size: 16),
+                ],
+              ),
+            ),
+            const SizedBox(height: 21),
+            const Text('市町村を検索',
+                style: TextStyle(color: ink, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 7),
+            CupertinoTextField(
+              controller: _cityController,
+              focusNode: _cityFocus,
+              placeholder: '例：那覇、なは、沖縄…',
+              prefix: const Padding(
+                padding: EdgeInsets.only(left: 15, right: 9),
+                child: Icon(CupertinoIcons.search, color: coral),
+              ),
+              suffix: _city == null
+                  ? null
+                  : const Padding(
+                      padding: EdgeInsets.only(right: 13),
+                      child: Icon(CupertinoIcons.check_mark_circled_solid,
+                          color: Color(0xFF6E9273)),
+                    ),
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              style: const TextStyle(color: ink, fontSize: 15),
+              decoration: BoxDecoration(
+                color: paper,
+                borderRadius: BorderRadius.circular(17),
+                border: Border.all(color: _city == null
+                    ? const Color(0xFFE6D9C8)
+                    : const Color(0xFF9EC2A5)),
+              ),
+              onTap: () => setState(() => _showCityCandidates = true),
+              onChanged: (_) => setState(() {
+                _city = null;
+                _district = null;
+                _districtController.clear();
+                _showCityCandidates = true;
+                _showDistrictCandidates = false;
+                _error = null;
+              }),
+            ),
+            if (_showCityCandidates && _city == null)
+              if (cityOptions.isNotEmpty)
+                _suggestions(cityOptions, _chooseCity)
+              else
+                const Padding(
+                  padding: EdgeInsets.only(top: 10),
+                  child: Text('一致する市町村がありません。',
+                      style: TextStyle(color: mutedInk)),
+                ),
+            if (_city != null) ...[
+              const SizedBox(height: 22),
+              const Text('収集地区',
+                  style: TextStyle(color: ink, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 7),
+              if (districts.isEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 16),
+                  decoration: BoxDecoration(
+                    color: paper,
+                    borderRadius: BorderRadius.circular(17),
+                    border: Border.all(color: const Color(0xFFE6D9C8)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(CupertinoIcons.clock, color: mutedInk),
+                      SizedBox(width: 10),
+                      Expanded(child: Text('地区データを準備中',
+                          style: TextStyle(color: mutedInk))),
+                    ],
+                  ),
+                )
+              else ...[
+                CupertinoTextField(
+                  controller: _districtController,
+                  focusNode: _districtFocus,
+                  placeholder: '地区名の一部を入力',
+                  prefix: const Padding(
+                    padding: EdgeInsets.only(left: 15, right: 9),
+                    child: Icon(CupertinoIcons.search, color: coral),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  decoration: BoxDecoration(
+                    color: paper,
+                    borderRadius: BorderRadius.circular(17),
+                    border: Border.all(color: const Color(0xFFE6D9C8)),
+                  ),
+                  onTap: () => setState(() => _showDistrictCandidates = true),
+                  onChanged: (_) => setState(() {
+                    _district = null;
+                    _showDistrictCandidates = true;
+                    _error = null;
+                  }),
+                ),
+                if (_showDistrictCandidates && _district == null)
+                  if (districtOptions.isNotEmpty)
+                    _suggestions(districtOptions, _chooseDistrict)
+                  else
+                    const Padding(
+                      padding: EdgeInsets.only(top: 10),
+                      child: Text('一致する地区がありません。',
+                          style: TextStyle(color: mutedInk)),
+                    ),
+              ],
+              const SizedBox(height: 9),
+              Text(districts.isEmpty
+                  ? '地区別の収集情報は準備中。今は市町村だけ登録できるよ。'
+                  : '地区名も候補から選択してね。',
+                  style: const TextStyle(color: mutedInk, fontSize: 12)),
+            ],
+            const SizedBox(height: 18),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: const TextStyle(color: coral)),
+            ],
+            const SizedBox(height: 25),
+            CupertinoButton.filled(
+              onPressed: _saving || !canRegister ? null : _registerRegion,
+              child: Text(_saving ? '保存中…' : 'この地域で始める'),
+            ),
+            const SizedBox(height: 7),
+            CupertinoButton(
+              onPressed: _saving ? null : _skip,
+              child: const Text('あとで登録する',
+                  style: TextStyle(color: mutedInk, fontSize: 14)),
+            ),
+            const SizedBox(height: 8),
+            const Text('回収日・処分方法は公式情報が確認できた地域だけ表示するよ。',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: mutedInk, fontSize: 11)),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // 電池の捨て方・回収日
@@ -1260,9 +1965,17 @@ class DisposalPage extends StatefulWidget {
 
 class _DisposalPageState extends State<DisposalPage> {
   final TextEditingController municipalityController = TextEditingController();
+  final TextEditingController districtController = TextEditingController();
+  final FocusNode municipalityFocus = FocusNode();
+  final FocusNode districtFocus = FocusNode();
   final Map<String, DateTime> dates = {};
-  String selectedType = 'dry';
+  DisposalAreaOption? selectedMunicipality;
+  DisposalAreaOption? selectedDistrict;
   String registeredMunicipality = '';
+  String? registeredDistrict;
+  bool citySuggestionsVisible = false;
+  bool districtSuggestionsVisible = false;
+  String selectedType = 'dry';
   bool loading = true;
   bool saving = false;
   bool saved = false;
@@ -1284,6 +1997,9 @@ class _DisposalPageState extends State<DisposalPage> {
   @override
   void dispose() {
     municipalityController.dispose();
+    districtController.dispose();
+    municipalityFocus.dispose();
+    districtFocus.dispose();
     super.dispose();
   }
 
@@ -1294,7 +2010,24 @@ class _DisposalPageState extends State<DisposalPage> {
       final savedDates = data['dates'];
       setState(() {
         registeredMunicipality = data['municipality'] as String? ?? '';
-        municipalityController.text = registeredMunicipality;
+        registeredDistrict = data['district'] as String?;
+        // 以前の自由入力データは候補と完全一致した場合のみ復元。
+        selectedMunicipality = DisposalAreaCatalog.findMunicipality(
+          data['municipalityCode'] as String?, registeredMunicipality,
+        );
+        municipalityController.text =
+            selectedMunicipality?.name ?? registeredMunicipality;
+        final availableDistricts = selectedMunicipality == null
+            ? const <DisposalAreaOption>[]
+            : DisposalAreaCatalog.districtsFor(selectedMunicipality!.code);
+        for (final item in availableDistricts) {
+          if (item.code == data['districtCode'] ||
+              (data['districtCode'] == null && item.name == registeredDistrict)) {
+            selectedDistrict = item;
+            break;
+          }
+        }
+        districtController.text = selectedDistrict?.name ?? '';
         if (savedDates is Map) {
           for (final entry in savedDates.entries) {
             final date = DateTime.tryParse(entry.value.toString());
@@ -1313,6 +2046,16 @@ class _DisposalPageState extends State<DisposalPage> {
   }
 
   Future<void> chooseDate() async {
+    final city = selectedMunicipality;
+    if (city == null || municipalityController.text.trim() != city.name) {
+      setState(() => error = '先に検索候補から市町村を選んでね');
+      return;
+    }
+    if (DisposalAreaCatalog.districtsFor(city.code).isNotEmpty &&
+        selectedDistrict == null) {
+      setState(() => error = '先に検索候補から収集地区を選んでね');
+      return;
+    }
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     DateTime chosen = dates[selectedType] ?? today.add(const Duration(days: 7));
@@ -1364,25 +2107,76 @@ class _DisposalPageState extends State<DisposalPage> {
     );
   }
 
+  void _selectMunicipality(DisposalAreaOption option) {
+    final oldCity = selectedMunicipality?.code;
+    setState(() {
+      if (oldCity != option.code && registeredMunicipality != option.name) {
+        // 他の市町村の回収予定日を流用しない。
+        dates.clear();
+      }
+      selectedMunicipality = option;
+      selectedDistrict = null;
+      municipalityController.text = option.name;
+      districtController.clear();
+      citySuggestionsVisible = false;
+      districtSuggestionsVisible = false;
+      saved = false;
+      error = null;
+    });
+    municipalityFocus.unfocus();
+  }
+
+  void _selectDistrict(DisposalAreaOption option) {
+    setState(() {
+      if (selectedDistrict?.code != option.code &&
+          registeredDistrict != option.name) {
+        dates.clear();
+      }
+      selectedDistrict = option;
+      districtController.text = option.name;
+      districtSuggestionsVisible = false;
+      saved = false;
+      error = null;
+    });
+    districtFocus.unfocus();
+  }
+
   Future<void> saveSchedule() async {
-    final municipality = municipalityController.text.trim();
-    if (municipality.isEmpty) {
-      setState(() => error = '自治体・地区を入力してね');
+    final city = selectedMunicipality;
+    if (city == null || municipalityController.text.trim() != city.name) {
+      setState(() => error = '検索候補をタップして市町村を選んでね');
       return;
     }
-    if (dates.isEmpty) {
-      setState(() => error = '回収日を1つ登録してね');
+    final districtOptions = DisposalAreaCatalog.districtsFor(city.code);
+    if (districtOptions.isNotEmpty &&
+        (selectedDistrict == null ||
+         districtController.text.trim() != selectedDistrict!.name)) {
+      setState(() => error = '検索候補から収集地区を選んでね');
       return;
     }
+    final regionChanged = city.name != registeredMunicipality ||
+        selectedDistrict?.name != registeredDistrict;
+    // 手入力の予定日は任意。地区が変わったときの以前の予定日は保存しない。
+    final safeDates = {...dates};
     setState(() {
       saving = true;
       error = null;
     });
     try {
-      await LocalBatteryStore.saveDisposalSchedule(municipality, dates);
+      await LocalBatteryStore.saveDisposalSchedule(
+        city.name,
+        safeDates,
+        municipalityCode: city.code,
+        district: selectedDistrict?.name,
+        districtCode: selectedDistrict?.code,
+      );
       if (!mounted) return;
       setState(() {
-        registeredMunicipality = municipality;
+        if (regionChanged) {
+          dates..clear()..addAll(safeDates);
+        }
+        registeredMunicipality = city.name;
+        registeredDistrict = selectedDistrict?.name;
         saving = false;
         saved = true;
       });
@@ -1394,6 +2188,42 @@ class _DisposalPageState extends State<DisposalPage> {
       });
     }
   }
+
+  Widget _suggestionList(
+    List<DisposalAreaOption> options,
+    void Function(DisposalAreaOption) onSelect,
+  ) => Container(
+        margin: const EdgeInsets.only(top: 7),
+        decoration: BoxDecoration(
+          color: paper,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE6D9C8)),
+        ),
+        child: Column(
+          children: [
+            for (var i = 0; i < options.length; i++) ...[
+              if (i > 0)
+                Container(height: 1, color: const Color(0xFFF0E6DA)),
+              CupertinoButton(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                onPressed: () => onSelect(options[i]),
+                child: Row(
+                  children: [
+                    const Icon(CupertinoIcons.location,
+                        color: Color(0xFFCC706B), size: 19),
+                    const SizedBox(width: 11),
+                    Expanded(child: Text(options[i].name,
+                        style: const TextStyle(color: ink, fontSize: 15,
+                            fontWeight: FontWeight.w600))),
+                    const Icon(CupertinoIcons.chevron_right,
+                        color: mutedInk, size: 15),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
 
   /// 公式サイトを外部ブラウザで開く。ポップアップ制限などで失敗したらURLをコピー。
   Future<void> openOfficialGuide(String url) async {
@@ -1505,17 +2335,25 @@ class _DisposalPageState extends State<DisposalPage> {
 
   @override
   Widget build(BuildContext context) {
-    final next = dates[selectedType];
-    final cityHasChanged = municipalityController.text.trim() !=
-        registeredMunicipality;
+    final cityHasChanged = selectedMunicipality?.name !=
+            registeredMunicipality ||
+        selectedDistrict?.name != registeredDistrict;
+    final availableDistricts = selectedMunicipality == null
+        ? const <DisposalAreaOption>[]
+        : DisposalAreaCatalog.districtsFor(selectedMunicipality!.code);
+    final regionReady = selectedMunicipality != null &&
+        (availableDistricts.isEmpty || selectedDistrict != null);
+    final next = regionReady ? dates[selectedType] : null;
+    final citySuggestions = DisposalAreaCatalog.search(
+        DisposalAreaCatalog.municipalities, municipalityController.text);
+    final districtSuggestions = DisposalAreaCatalog.search(
+        availableDistricts, districtController.text);
+    final savedRegionText = '保存したよ！ 沖縄県 ' +
+        (selectedMunicipality?.name ?? '') +
+        (selectedDistrict == null ? '' : '・' + selectedDistrict!.name);
     final steps = disposalSteps;
     return CupertinoPageScaffold(
       backgroundColor: cream,
-      navigationBar: const CupertinoNavigationBar(
-        backgroundColor: cream,
-        border: null,
-        middle: Text('電池の捨て方', style: TextStyle(color: ink)),
-      ),
       child: SafeArea(
         child: loading
             ? const Center(child: CupertinoActivityIndicator())
@@ -1637,90 +2475,189 @@ class _DisposalPageState extends State<DisposalPage> {
                     ),
                   ),
                   const SizedBox(height: 22),
-                  // 4. 地域（住所の詳細入力は必須にしない）
-                  const _FieldTitle('お住まいの地域・収集地区'),
-                  const SizedBox(height: 4),
+                  // 4. オートコンプリート：候補をタップして正規の地域IDを確定する。
+                  const _FieldTitle('お住まいの地域'),
+                  const SizedBox(height: 7),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 13),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3E8DB),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(CupertinoIcons.location_solid,
+                            size: 19, color: Color(0xFFCC706B)),
+                        SizedBox(width: 10),
+                        Expanded(child: Text('沖縄県',
+                            style: TextStyle(color: ink, fontSize: 15,
+                                fontWeight: FontWeight.w700))),
+                        Icon(CupertinoIcons.lock,
+                            size: 15, color: mutedInk),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  const Text('市町村を検索', style: TextStyle(
+                      color: ink, fontSize: 14, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 7),
                   CupertinoTextField(
                     controller: municipalityController,
-                    placeholder: '沖縄県 那覇市 おもろまち2丁目',
-                    placeholderStyle: const TextStyle(
-                      color: Color(0xFFB3AEA9),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    focusNode: municipalityFocus,
+                    placeholder: '例：那覇、なは、浦添…',
                     prefix: const Padding(
-                      padding: EdgeInsets.only(left: 16, right: 10),
-                      child: Icon(CupertinoIcons.location_solid,
+                      padding: EdgeInsets.only(left: 15, right: 9),
+                      child: Icon(CupertinoIcons.search,
                           color: Color(0xFFCC706B), size: 20),
                     ),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 17),
+                    suffix: selectedMunicipality == null
+                        ? null
+                        : const Padding(
+                            padding: EdgeInsets.only(right: 12),
+                            child: Icon(CupertinoIcons.check_mark_circled_solid,
+                                color: Color(0xFF6E9273), size: 19)),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFFFDF9),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: const Color(0xFFE6D9C8)),
+                      borderRadius: BorderRadius.circular(17),
+                      border: Border.all(color: selectedMunicipality == null
+                          ? const Color(0xFFE6D9C8)
+                          : const Color(0xFF9EC2A5)),
                     ),
-                    style: const TextStyle(
-                      color: ink, fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: const TextStyle(color: ink, fontSize: 15),
+                    onTap: () => setState(() => citySuggestionsVisible = true),
                     onChanged: (_) => setState(() {
+                      selectedMunicipality = null;
+                      selectedDistrict = null;
+                      districtController.clear();
+                      citySuggestionsVisible = true;
+                      districtSuggestionsVisible = false;
                       saved = false;
                       error = null;
-                      if (registeredMunicipality.isNotEmpty &&
-                          municipalityController.text.trim() !=
-                              registeredMunicipality) {
-                        // 異なる地域の回収日を誤って使わない。
-                        dates.clear();
-                      }
                     }),
                   ),
-                  if (cityHasChanged && registeredMunicipality.isNotEmpty) ...[
+                  if (citySuggestionsVisible && selectedMunicipality == null)
+                    if (citySuggestions.isNotEmpty)
+                      _suggestionList(citySuggestions, _selectMunicipality)
+                    else
+                      const Padding(
+                        padding: EdgeInsets.only(top: 9),
+                        child: Text('一致する市町村がありません。名前の一部で検索してね。',
+                            style: TextStyle(color: mutedInk, fontSize: 12)),
+                      ),
+                  if (selectedMunicipality != null) ...[
+                    const SizedBox(height: 16),
+                    const Text('収集地区を検索', style: TextStyle(
+                        color: ink, fontSize: 14,
+                        fontWeight: FontWeight.w700)),
                     const SizedBox(height: 7),
-                    const Text('地域が変わったので回収日を再設定してね。',
+                    if (availableDistricts.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 15, vertical: 15),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFDF9),
+                          borderRadius: BorderRadius.circular(17),
+                          border: Border.all(color: const Color(0xFFE6D9C8)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(CupertinoIcons.search,
+                                size: 19, color: mutedInk),
+                            SizedBox(width: 10),
+                            Expanded(child: Text('地区データを準備中',
+                                style: TextStyle(color: mutedInk,
+                                    fontSize: 14))),
+                            Icon(CupertinoIcons.clock,
+                                color: mutedInk, size: 17),
+                          ],
+                        ),
+                      )
+                    else ...[
+                      CupertinoTextField(
+                        controller: districtController,
+                        focusNode: districtFocus,
+                        placeholder: '地区名の一部を入力',
+                        prefix: const Padding(
+                          padding: EdgeInsets.only(left: 15, right: 9),
+                          child: Icon(CupertinoIcons.search,
+                              color: Color(0xFFCC706B), size: 20),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFDF9),
+                          borderRadius: BorderRadius.circular(17),
+                          border: Border.all(color: const Color(0xFFE6D9C8)),
+                        ),
+                        onTap: () => setState(() =>
+                            districtSuggestionsVisible = true),
+                        onChanged: (_) => setState(() {
+                          selectedDistrict = null;
+                          districtSuggestionsVisible = true;
+                          saved = false;
+                          error = null;
+                        }),
+                      ),
+                      if (districtSuggestionsVisible && selectedDistrict == null)
+                        if (districtSuggestions.isNotEmpty)
+                          _suggestionList(districtSuggestions, _selectDistrict)
+                        else
+                          const Padding(
+                            padding: EdgeInsets.only(top: 9),
+                            child: Text('該当する地区がありません。',
+                                style: TextStyle(color: mutedInk,
+                                    fontSize: 12)),
+                          ),
+                    ],
+                    const SizedBox(height: 9),
+                    Text(availableDistricts.isEmpty
+                        ? '地区別データは未接続。今は市町村だけ登録できるよ。回収日は自動表示されません。'
+                        : '地区を候補から選ぶと、地域が確定するよ。',
+                        style: const TextStyle(color: mutedInk,
+                            fontSize: 11.5, height: 1.5)),
+                  ],
+                  if (cityHasChanged && registeredMunicipality.isNotEmpty) ...[
+                    const SizedBox(height: 9),
+                    const Text('地域を変更する場合、以前の回収予定日は引き継がれないよ。',
                         style: TextStyle(color: coral, fontSize: 12)),
                   ],
-                  const SizedBox(height: 9),
+                  const SizedBox(height: 10),
                   const Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(CupertinoIcons.lock,
-                          size: 13, color: mutedInk),
+                      Icon(CupertinoIcons.lock, size: 13, color: mutedInk),
                       SizedBox(width: 7),
-                      Expanded(
-                        child: Text('町名までOK。この端末にだけ保存されるよ',
-                            style: TextStyle(
-                                color: mutedInk, fontSize: 11.5,
-                                fontWeight: FontWeight.w600)),
-                      ),
+                      Expanded(child: Text('番地・部屋番号は不要。地域はこの端末に保存されるよ。',
+                          style: TextStyle(color: mutedInk,
+                              fontSize: 11.5, fontWeight: FontWeight.w600))),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
                   if (error != null) ...[
-                    const SizedBox(height: 13),
                     Text(error!, style: const TextStyle(
                         color: coral, fontSize: 12)),
+                    const SizedBox(height: 10),
                   ],
-                  const SizedBox(height: 19),
                   SizedBox(
                     width: double.infinity,
                     child: CupertinoButton.filled(
-                      onPressed: saving ? null : saveSchedule,
-                      child: Text(saving ? '保存中…' : '回収予定日を保存する'),
+                      onPressed: saving || selectedMunicipality == null ||
+                              (availableDistricts.isNotEmpty &&
+                               selectedDistrict == null)
+                          ? null : saveSchedule,
+                      child: Text(saving ? '保存中…' : 'この地域を保存する'),
                     ),
                   ),
                   if (saved) ...[
                     const SizedBox(height: 9),
-                    const Center(
-                      child: Text('保存したよ！',
-                          style: TextStyle(
-                            color: Color(0xFF6E9273),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                          )),
-                    ),
+                    Center(child: Text(
+                        savedRegionText,
+                        style: const TextStyle(color: Color(0xFF6E9273),
+                            fontSize: 13, fontWeight: FontWeight.w700))),
                   ],
-                   const SizedBox(height: 26),
+                  const SizedBox(height: 20),
+                  const SizedBox(height: 26),
                   const Text('公式の案内',
                       style: TextStyle(
                           color: ink, fontSize: 16,
@@ -1961,67 +2898,104 @@ class _InventoryPageState extends State<InventoryPage> {
 
     return CupertinoPageScaffold(
       backgroundColor: cream,
-      navigationBar: CupertinoNavigationBar(
+      // 右上の追加ボタンは撤去。画面右下にスクロールしない固定ボタンを配置。
+      navigationBar: const CupertinoNavigationBar(
         backgroundColor: cream,
         border: null,
-        middle: const Text('在庫棚', style: TextStyle(color: ink)),
-        trailing: CupertinoButton(
-          padding: EdgeInsets.zero,
-          onPressed: openAddPage,
-          child: const Icon(CupertinoIcons.add_circled_solid,
-              size: 28, color: coral),
-        ),
       ),
       child: SafeArea(
-        child: loading
-            ? const Center(child: CupertinoActivityIndicator())
-            : entries.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SoftBattery(manufacturer: 'maxell', size: 95),
-                          const SizedBox(height: 14),
-                          const Text('在庫はありません',
-                              style: TextStyle(
-                                  color: ink, fontSize: 19,
-                                  fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 8),
-                          const Text('右上の＋から電池を追加',
-                              style: TextStyle(color: mutedInk)),
-                          const SizedBox(height: 18),
-                        ],
-                      ),
-                    ),
-                  )
-                : ListView(
-                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 36),
-                    children: [
-                      const SizedBox(height: 18),
-                      for (final type in groupedTypes)
-                        TweenAnimationBuilder<double>(
-                          key: ValueKey('shelf-$type'),
-                          tween: Tween<double>(begin: 0, end: 1),
-                          duration: const Duration(milliseconds: 800),
-                          curve: Curves.easeOutCubic,
-                          builder: (context, value, child) => Opacity(
-                            opacity: value,
-                            child: Transform.translate(
-                              offset: Offset(0, (1 - value) * 30),
-                              child: child,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: loading
+                  ? const Center(child: CupertinoActivityIndicator())
+                  : entries.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SoftBattery(manufacturer: 'maxell', size: 95),
+                                const SizedBox(height: 14),
+                                const Text('在庫はありません',
+                                    style: TextStyle(
+                                        color: ink, fontSize: 19,
+                                        fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 8),
+                                const Text('右下の＋から電池を追加',
+                                    style: TextStyle(color: mutedInk)),
+                                const SizedBox(height: 18),
+                              ],
                             ),
                           ),
-                          child: _ShelfSection(
-                            title: type,
-                            entries: entries.where((e) => e.type == type).toList(),
-                            onUse: useBattery,
-                            onMove: moveBattery,
-                          ),
+                        )
+                      : ListView(
+                          // 固定された＋ボタンが最後の棚を隠さないように下部を確保。
+                          padding: const EdgeInsets.fromLTRB(18, 16, 18, 116),
+                          children: [
+                            const SizedBox(height: 18),
+                            for (final type in groupedTypes)
+                              TweenAnimationBuilder<double>(
+                                key: ValueKey('shelf-$type'),
+                                tween: Tween<double>(begin: 0, end: 1),
+                                duration: const Duration(milliseconds: 800),
+                                curve: Curves.easeOutCubic,
+                                builder: (context, value, child) => Opacity(
+                                  opacity: value,
+                                  child: Transform.translate(
+                                    offset: Offset(0, (1 - value) * 30),
+                                    child: child,
+                                  ),
+                                ),
+                                child: _ShelfSection(
+                                  title: type,
+                                  entries: entries.where((e) => e.type == type).toList(),
+                                  onUse: useBattery,
+                                  onMove: moveBattery,
+                                ),
+                              ),
+                          ],
                         ),
-                    ],
+            ),
+            // StackはListViewの外側。スクロールしてもこのボタンは動かない。
+            // 下部の3タブより上、右寄りの位置に固定する。
+            if (!loading)
+              Positioned(
+                right: 22,
+                bottom: 18,
+                child: Semantics(
+                  label: '電池を追加',
+                  button: true,
+                  child: CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    onPressed: openAddPage,
+                    child: Container(
+                      width: 68,
+                      height: 68,
+                      alignment: Alignment.center,
+                      decoration: const BoxDecoration(
+                        color: coral,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Color(0x37B55C55),
+                            blurRadius: 15,
+                            offset: Offset(0, 5),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        CupertinoIcons.add,
+                        size: 35,
+                        color: CupertinoColors.white,
+                      ),
+                    ),
                   ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -3520,7 +4494,7 @@ class PickupTearOffCalendar extends StatelessWidget {
             ),
             SizedBox(height: 19 * scale),
             Text(
-              '回収日はまだ未設定',
+              '回収日未設定',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: _brown,
