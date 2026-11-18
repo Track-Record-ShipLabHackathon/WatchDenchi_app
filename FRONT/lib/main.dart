@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'services/anonymous_session.dart';
 
@@ -1311,20 +1312,6 @@ class _DisposalPageState extends State<DisposalPage> {
     }
   }
 
-  String dateLabel(DateTime date) {
-    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-    return '${date.year}年${date.month}月${date.day}日'
-        '（${weekdays[date.weekday % 7]}）';
-  }
-
-  int? daysUntil(DateTime? value) {
-    if (value == null) return null;
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final target = DateTime(value.year, value.month, value.day);
-    return target.difference(today).inDays;
-  }
-
   Future<void> chooseDate() async {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -1408,14 +1395,32 @@ class _DisposalPageState extends State<DisposalPage> {
     }
   }
 
-  Future<void> copyReference(String url) async {
-    await Clipboard.setData(ClipboardData(text: url));
+  /// 公式サイトを外部ブラウザで開く。ポップアップ制限などで失敗したらURLをコピー。
+  Future<void> openOfficialGuide(String url) async {
+    try {
+      final opened = await launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      );
+      if (opened) return;
+    } catch (error) {
+      debugPrint('公式サイトの起動に失敗: $error');
+    }
+    if (!mounted) return;
+    try {
+      await Clipboard.setData(ClipboardData(text: url));
+    } catch (error) {
+      debugPrint('URLのコピーにも失敗: $error');
+      if (!mounted) return;
+      await showError(context, '公式サイトを開けませんでした。通信状況を確認してね。');
+      return;
+    }
     if (!mounted) return;
     await showCupertinoDialog<void>(
       context: context,
       builder: (dialogContext) => CupertinoAlertDialog(
-        title: const Text('URLをコピーしました'),
-        content: const Text('ブラウザに貼り付けて開いてね'),
+        title: const Text('公式サイトを開けませんでした'),
+        content: const Text('URLをコピーしたよ。ブラウザに貼り付けて開いてね。'),
         actions: [
           CupertinoDialogAction(
             onPressed: () => Navigator.of(dialogContext).pop(),
@@ -1426,27 +1431,84 @@ class _DisposalPageState extends State<DisposalPage> {
     );
   }
 
-  String get guidance {
+  // 電池の種類別に、長い説明文ではなく2ステップで案内。
+  // 分別や回収可否は自治体・回収店によって異なるため、固定の収集日を作らない。
+  String get selectedBatteryLabel =>
+      categories.firstWhere((item) => item['key'] == selectedType)['name']!;
+
+  String get batteryExample {
     switch (selectedType) {
       case 'dry':
-        return '単1〜単5形など。＋極と−極をテープで絶縁して、自治体の分別方法を確認しよう。';
+        return '単1〜単5形';
       case 'coin':
-        return 'CR2032・CR2025など。金属部分をテープで絶縁し、自治体の案内を確認しよう。';
+        return 'CR2032など';
       case 'button':
-        return 'LR44など。自治体回収がなければ、ボタン電池の回収協力店を確認しよう。';
+        return 'LR44など';
       case 'recharge':
-        return 'ニッケル水素・リチウムイオンなど。回収対象かを確認して、協力店や自治体の案内に従おう。膨張・破損したものは回収店へ持ち込む前に相談してね。';
+        return 'ニッケル水素など';
       default:
-        return '自治体の案内を確認しよう。';
+        return '電池';
     }
   }
+
+  List<String> get disposalSteps {
+    switch (selectedType) {
+      case 'dry':
+        return ['＋と−をテープで絶縁', '自治体のルールで出す'];
+      case 'coin':
+        return ['表裏の電極をテープで絶縁', '自治体の指定方法で出す'];
+      case 'button':
+        return ['電極をテープで絶縁', '回収協力店などへ持ち込む'];
+      case 'recharge':
+        return ['端子をテープで絶縁', '回収対象を確認して持ち込む'];
+      default:
+        return ['電極を絶縁', '自治体の案内を確認する'];
+    }
+  }
+
+  String get disposalFootnote => selectedType == 'recharge'
+      ? '膨張・破損した電池は回収箱に入れず、回収先に相談'
+      : '分別・回収場所は自治体や回収店の案内を優先';
+
+  Widget _guideStep(int number, String label) => Padding(
+        padding: const EdgeInsets.only(bottom: 15),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                color: Color(0xFFCC706B),
+                shape: BoxShape.circle,
+              ),
+              child: Text('$number',
+                  style: const TextStyle(color: CupertinoColors.white,
+                      fontSize: 14, fontWeight: FontWeight.w800)),
+            ),
+            const SizedBox(width: 13),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: number == 1 ? const Color(0xFFA7544E) : ink,
+                  fontSize: 15,
+                  fontWeight: number == 1 ? FontWeight.w700 : FontWeight.w600,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
     final next = dates[selectedType];
-    final remaining = daysUntil(next);
     final cityHasChanged = municipalityController.text.trim() !=
         registeredMunicipality;
+    final steps = disposalSteps;
     return CupertinoPageScaffold(
       backgroundColor: cream,
       navigationBar: const CupertinoNavigationBar(
@@ -1458,82 +1520,20 @@ class _DisposalPageState extends State<DisposalPage> {
         child: loading
             ? const Center(child: CupertinoActivityIndicator())
             : ListView(
-                padding: const EdgeInsets.fromLTRB(22, 25, 22, 45),
+                padding: const EdgeInsets.fromLTRB(20, 22, 20, 45),
                 children: [
-                  const Text('いつ、どうやって捨てる？',
-                      style: TextStyle(color: ink,
-                          fontSize: 23, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 8),
-                  const Text('電池の種類ごとに、捨て方と回収日を確認。',
-                      style: TextStyle(color: mutedInk, fontSize: 13)),
-                  const SizedBox(height: 22),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: softCardDecoration(),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 58,
-                              height: 68,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFE2E9DD),
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: const Icon(CupertinoIcons.calendar,
-                                  color: Color(0xFF7A9581), size: 34),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('登録した次の回収日',
-                                      style: TextStyle(color: mutedInk,
-                                          fontSize: 13)),
-                                  const SizedBox(height: 5),
-                                  Text(next == null
-                                          ? 'まだ登録されていません'
-                                          : dateLabel(next),
-                                      style: const TextStyle(color: ink,
-                                          fontSize: 17,
-                                          fontWeight: FontWeight.w700)),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (remaining != null) ...[
-                          const SizedBox(height: 14),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 13, vertical: 9),
-                            decoration: BoxDecoration(
-                              color: paleCoral,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              remaining < 0
-                                  ? 'この回収日は過ぎました。日付を更新してね'
-                                  : remaining == 0
-                                      ? '今日が回収予定日！'
-                                      : '回収予定日まであと $remaining 日',
-                              style: const TextStyle(color: ink,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
+                  // 1. 日めくりカレンダーを画面の最上部に。ここから日付を変更できる。
+                  PickupTearOffCalendar(
+                    date: next,
+                    batteryType: selectedBatteryLabel,
+                    onEdit: chooseDate,
                   ),
-                  const SizedBox(height: 25),
+                  const SizedBox(height: 22),
+                  // 2. 電池の種類（画像と同じ横並びの丸いタブ）
                   const _FieldTitle('電池の種類'),
+                  const SizedBox(height: 5),
                   SizedBox(
-                    height: 49,
+                    height: 47,
                     child: ListView(
                       scrollDirection: Axis.horizontal,
                       children: [
@@ -1541,132 +1541,203 @@ class _DisposalPageState extends State<DisposalPage> {
                           Padding(
                             padding: const EdgeInsets.only(right: 9),
                             child: CupertinoButton(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
+                              padding: const EdgeInsets.symmetric(horizontal: 19),
                               color: selectedType == category['key']
-                                  ? coral : paper,
-                              borderRadius: BorderRadius.circular(14),
+                                  ? const Color(0xFFCC706B)
+                                  : const Color(0xFFFFFDF9),
+                              borderRadius: BorderRadius.circular(19),
                               onPressed: () => setState(() {
                                 selectedType = category['key']!;
                                 saved = false;
+                                error = null;
                               }),
-                              child: Text(category['name']!,
-                                  style: TextStyle(
-                                      color: selectedType == category['key']
-                                          ? CupertinoColors.white : ink,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600)),
+                              child: Text(
+                                category['name']!,
+                                style: TextStyle(
+                                  color: selectedType == category['key']
+                                      ? CupertinoColors.white : ink,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
                           ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 22),
+                  // 3. 電池の種類を切り替えた直後に、その電池の捨て方を表示する
                   Container(
-                    padding: const EdgeInsets.all(17),
-                    decoration: softCardDecoration(),
+                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 17),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFFDF9),
+                      borderRadius: BorderRadius.circular(23),
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('捨てるときのポイント',
-                            style: TextStyle(color: ink, fontSize: 15,
-                                fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 10),
-                        Text(guidance,
-                            style: const TextStyle(color: mutedInk,
-                                height: 1.55, fontSize: 13)),
-                        const SizedBox(height: 10),
-                        const Text('※ 実際の分別・回収場所は自治体や回収店の案内を優先してね。',
-                            style: TextStyle(color: mutedInk, fontSize: 11)),
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Text('捨てるときのポイント',
+                                  style: TextStyle(
+                                    color: ink,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                  )),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 7),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF4E4DB),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                batteryExample,
+                                style: const TextStyle(
+                                  color: Color(0xFF9E584C),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 17),
+                        _guideStep(1, steps[0]),
+                        _guideStep(2, steps[1]),
+                        Container(
+                          height: 1,
+                          color: const Color(0xFFE9DDCE),
+                          margin: const EdgeInsets.only(top: 2, bottom: 13),
+                        ),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.only(top: 2),
+                              child: Icon(CupertinoIcons.info_circle,
+                                  color: mutedInk, size: 16),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(disposalFootnote,
+                                  style: const TextStyle(
+                                    color: mutedInk,
+                                    fontSize: 12,
+                                    height: 1.45,
+                                    fontWeight: FontWeight.w500,
+                                  )),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 23),
-                  const _FieldTitle('自治体・収集地区'),
+                  const SizedBox(height: 22),
+                  // 4. 地域（住所の詳細入力は必須にしない）
+                  const _FieldTitle('お住まいの地域・収集地区'),
+                  const SizedBox(height: 4),
                   CupertinoTextField(
                     controller: municipalityController,
-                    placeholder: '例：〇〇市・△△地区',
-                    padding: const EdgeInsets.all(15),
-                    decoration: inputDecoration(),
+                    placeholder: '沖縄県 那覇市 おもろまち2丁目',
+                    placeholderStyle: const TextStyle(
+                      color: Color(0xFFB3AEA9),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    prefix: const Padding(
+                      padding: EdgeInsets.only(left: 16, right: 10),
+                      child: Icon(CupertinoIcons.location_solid,
+                          color: Color(0xFFCC706B), size: 20),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 17),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFFDF9),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: const Color(0xFFE6D9C8)),
+                    ),
+                    style: const TextStyle(
+                      color: ink, fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                     onChanged: (_) => setState(() {
                       saved = false;
                       error = null;
                       if (registeredMunicipality.isNotEmpty &&
                           municipalityController.text.trim() !=
                               registeredMunicipality) {
+                        // 異なる地域の回収日を誤って使わない。
                         dates.clear();
                       }
                     }),
                   ),
                   if (cityHasChanged && registeredMunicipality.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    const Text('地区が変わったので回収日を再設定してね。',
-                        style: TextStyle(color: mutedInk, fontSize: 11)),
+                    const SizedBox(height: 7),
+                    const Text('地域が変わったので回収日を再設定してね。',
+                        style: TextStyle(color: coral, fontSize: 12)),
                   ],
-                  const SizedBox(height: 20),
-                  const _FieldTitle('次の回収日を登録'),
-                  CupertinoButton(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 15),
-                    color: paper,
-                    borderRadius: BorderRadius.circular(14),
-                    onPressed: chooseDate,
-                    child: Row(
-                      children: [
-                        const Icon(CupertinoIcons.calendar,
-                            color: coral, size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(next == null
-                              ? 'カレンダーから日付を選ぶ'
-                              : dateLabel(next),
-                              style: const TextStyle(
-                                  color: ink, fontSize: 14)),
-                        ),
-                        const Icon(CupertinoIcons.chevron_right,
-                            color: mutedInk, size: 15),
-                      ],
-                    ),
+                  const SizedBox(height: 9),
+                  const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(CupertinoIcons.lock,
+                          size: 13, color: mutedInk),
+                      SizedBox(width: 7),
+                      Expanded(
+                        child: Text('町名までOK。この端末にだけ保存されるよ',
+                            style: TextStyle(
+                                color: mutedInk, fontSize: 11.5,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  const Text('自治体の公式カレンダーで確認した日付を入力してね。自動取得はまだありません。',
-                      style: TextStyle(color: mutedInk, fontSize: 11)),
+                  const SizedBox(height: 16),
                   if (error != null) ...[
                     const SizedBox(height: 13),
                     Text(error!, style: const TextStyle(
                         color: coral, fontSize: 12)),
                   ],
-                  const SizedBox(height: 22),
+                  const SizedBox(height: 19),
                   SizedBox(
                     width: double.infinity,
                     child: CupertinoButton.filled(
                       onPressed: saving ? null : saveSchedule,
-                      child: Text(saving ? '保存中…' : '回収日を保存する'),
+                      child: Text(saving ? '保存中…' : '回収予定日を保存する'),
                     ),
                   ),
                   if (saved) ...[
                     const SizedBox(height: 9),
-                    const Center(child: Text('保存したよ！',
-                        style: TextStyle(color: Color(0xFF6E9273),
+                    const Center(
+                      child: Text('保存したよ！',
+                          style: TextStyle(
+                            color: Color(0xFF6E9273),
                             fontSize: 13,
-                            fontWeight: FontWeight.w700))),
+                            fontWeight: FontWeight.w700,
+                          )),
+                    ),
                   ],
-                  const SizedBox(height: 27),
+                   const SizedBox(height: 26),
                   const Text('公式の案内',
-                      style: TextStyle(color: ink,
-                          fontSize: 16, fontWeight: FontWeight.w700)),
+                      style: TextStyle(
+                          color: ink, fontSize: 16,
+                          fontWeight: FontWeight.w700)),
                   const SizedBox(height: 9),
                   CupertinoButton(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 14, vertical: 12),
                     color: paper,
                     borderRadius: BorderRadius.circular(13),
-                    onPressed: () => copyReference(
+                    onPressed: () => openOfficialGuide(
                         'https://www.baj.or.jp/reuse_and_recycle/recycle/disposal.html'),
                     child: const Row(
                       children: [
                         Expanded(child: Text('電池工業会・捨て方ナビ',
                             style: TextStyle(color: ink, fontSize: 13))),
-                        Icon(CupertinoIcons.doc_on_doc,
+                        Icon(CupertinoIcons.chevron_right,
                             color: mutedInk, size: 18),
                       ],
                     ),
@@ -1677,13 +1748,13 @@ class _DisposalPageState extends State<DisposalPage> {
                         horizontal: 14, vertical: 12),
                     color: paper,
                     borderRadius: BorderRadius.circular(13),
-                    onPressed: () => copyReference(
+                    onPressed: () => openOfficialGuide(
                         'https://www.jbrc.com/general/recycle_kensaku/'),
                     child: const Row(
                       children: [
                         Expanded(child: Text('JBRC・回収協力店を探す',
                             style: TextStyle(color: ink, fontSize: 13))),
-                        Icon(CupertinoIcons.doc_on_doc,
+                        Icon(CupertinoIcons.chevron_right,
                             color: mutedInk, size: 18),
                       ],
                     ),
@@ -1693,6 +1764,7 @@ class _DisposalPageState extends State<DisposalPage> {
       ),
     );
   }
+
 }
 
 // 在庫棚画面・電池の追加と移動
@@ -3257,6 +3329,342 @@ Future<void> showError(BuildContext context, String message) {
           child: const Text('OK'),
         ),
       ],
+    ),
+  );
+}
+
+// ---- 電池の捨て方：日めくりカレンダーUI ----
+/// 採用デザイン（2026-11）：月を日付の上に置き、日付を大きく見せる。
+/// 地域の自動取得にはまだ接続しない。既存の手動登録データのみ表示する。
+/// 端末の幅に合わせて縮むので、小さな画面でも数字がはみ出さない。
+class PickupTearOffCalendar extends StatelessWidget {
+  const PickupTearOffCalendar({
+    super.key,
+    required this.date,
+    required this.batteryType,
+    required this.onEdit,
+  });
+
+  final DateTime? date;
+  final String batteryType;
+  final VoidCallback onEdit;
+
+  static const Color _brown = Color(0xFF684A3D);
+  static const Color _red = Color(0xFFE45D51);
+  static const Color _sheetColor = Color(0xFFFFFBF7);
+  static const Color _dividerColor = Color(0xFFE2C7AD);
+
+  int? get _daysUntil {
+    if (date == null) return null;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date!.year, date!.month, date!.day);
+    return target.difference(today).inDays;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // デザイン画像の縦横比を参考にしつつ、実機では可変レイアウトにする。
+        final width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 340.0;
+        final scale = (width / 340).clamp(0.78, 1.12).toDouble();
+        return Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _CalendarRing(scale: scale),
+                SizedBox(width: 126 * scale),
+                _CalendarRing(scale: scale),
+              ],
+            ),
+            Transform.translate(
+              offset: Offset(0, -8 * scale),
+              child: Stack(
+                children: [
+                  // 下の紙：めくれる紙の厚みと影。
+                  Positioned.fill(
+                    top: 10 * scale,
+                    left: 10 * scale,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE8D7C4),
+                        borderRadius: BorderRadius.circular(24 * scale),
+                        border: Border.all(
+                          color: const Color(0xFFDDC7B3),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.only(
+                      right: 10 * scale,
+                      bottom: 10 * scale,
+                    ),
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 430),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(
+                          position: Tween<Offset>(
+                            begin: const Offset(0, -0.10),
+                            end: Offset.zero,
+                          ).animate(animation),
+                          child: child,
+                        ),
+                      ),
+                      child: _calendarSheet(
+                        key: ValueKey<String>(
+                          '$batteryType-${date?.millisecondsSinceEpoch ?? 0}',
+                        ),
+                        scale: scale,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _calendarSheet({required Key key, required double scale}) {
+    final day = date;
+    final remaining = _daysUntil;
+    final weekday = day == null
+        ? ''
+        : const ['日', '月', '火', '水', '木', '金', '土'][day.weekday % 7];
+
+    final String countdown;
+    if (remaining == null) {
+      countdown = '回収日を設定しよう';
+    } else if (remaining < 0) {
+      countdown = '予定日を更新してね';
+    } else if (remaining == 0) {
+      countdown = '今日が回収予定日！';
+    } else {
+      countdown = 'あと $remaining 日';
+    }
+
+    return Container(
+      key: key,
+      width: double.infinity,
+      padding: EdgeInsets.fromLTRB(
+        17 * scale, 17 * scale, 17 * scale, 15 * scale,
+      ),
+      decoration: BoxDecoration(
+        color: _sheetColor,
+        borderRadius: BorderRadius.circular(24 * scale),
+        border: Border.all(color: const Color(0xFFE7D0BC), width: 1.3),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x1658473D),
+            blurRadius: 16,
+            offset: Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 小さな英字見出しと両側の線。
+          Row(
+            children: [
+              const Expanded(child: _CalendarShortRule()),
+              SizedBox(width: 9 * scale),
+              Icon(
+                CupertinoIcons.calendar,
+                color: _brown,
+                size: 13 * scale,
+              ),
+              SizedBox(width: 6 * scale),
+              Text(
+                'NEXT COLLECTION',
+                style: TextStyle(
+                  color: _brown,
+                  fontSize: 10.5 * scale,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5 * scale,
+                ),
+              ),
+              SizedBox(width: 9 * scale),
+              const Expanded(child: _CalendarShortRule()),
+            ],
+          ),
+          SizedBox(height: 16 * scale),
+          Text(
+            '$batteryTypeの次の回収予定日',
+            maxLines: 2,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 17 * scale,
+              fontWeight: FontWeight.w800,
+              color: _brown,
+            ),
+          ),
+          SizedBox(height: 12 * scale),
+          const _DottedRule(),
+          if (day == null) ...[
+            SizedBox(height: 39 * scale),
+            Icon(
+              CupertinoIcons.calendar,
+              color: const Color(0xFFCBA99A),
+              size: 60 * scale,
+            ),
+            SizedBox(height: 19 * scale),
+            Text(
+              '回収日はまだ未設定',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _brown,
+                fontSize: 18 * scale,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            SizedBox(height: 49 * scale),
+          ] else ...[
+            SizedBox(height: 20 * scale),
+            Text(
+              '${day.month}月',
+              style: TextStyle(
+                color: _brown,
+                fontSize: 34 * scale,
+                fontWeight: FontWeight.w800,
+                height: 1.0,
+              ),
+            ),
+            // 日付が主役。1桁の日付も自然に大きく表示する。
+            SizedBox(height: 7 * scale),
+            Semantics(
+              label: '${day.year}年${day.month}月${day.day}日',
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '${day.day}',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: _red,
+                    fontSize: (day.day < 10 ? 143 : 139) * scale,
+                    fontWeight: FontWeight.w800,
+                    height: 1.02,
+                    letterSpacing: -4 * scale,
+                  ),
+                ),
+              ),
+            ),
+            Text(
+              '$weekday曜日',
+              style: TextStyle(
+                color: _brown,
+                fontSize: 24 * scale,
+                height: 1.04,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            SizedBox(height: 18 * scale),
+          ],
+          Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: 25 * scale,
+              vertical: 8 * scale,
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF9DEDA),
+              borderRadius: BorderRadius.circular(50),
+            ),
+            child: Text(
+              countdown,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _red,
+                fontWeight: FontWeight.w800,
+                fontSize: 19 * scale,
+              ),
+            ),
+          ),
+          SizedBox(height: 17 * scale),
+          CupertinoButton(
+            onPressed: onEdit,
+            padding: EdgeInsets.symmetric(
+              horizontal: 7 * scale,
+              vertical: 3 * scale,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(CupertinoIcons.pencil, color: _red, size: 17 * scale),
+                SizedBox(width: 8 * scale),
+                Text(
+                  day == null ? '日付を設定する' : '予定日を変更する',
+                  style: TextStyle(
+                    color: _red,
+                    fontSize: 15 * scale,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DottedRule extends StatelessWidget {
+  const _DottedRule();
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: List.generate(
+      23,
+      (_) => const Expanded(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 2),
+          child: ColoredBox(
+            color: PickupTearOffCalendar._dividerColor,
+            child: SizedBox(height: 1.8),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _CalendarShortRule extends StatelessWidget {
+  const _CalendarShortRule();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    height: 1.5,
+    color: const Color(0xFFE2C7AD),
+  );
+}
+
+class _CalendarRing extends StatelessWidget {
+  const _CalendarRing({required this.scale});
+
+  final double scale;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 16 * scale,
+    height: 32 * scale,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(10 * scale),
+      border: Border.all(
+        color: const Color(0xFFA77D5D),
+        width: 4 * scale,
+      ),
+      color: const Color(0xFFF5EFE5),
     ),
   );
 }
