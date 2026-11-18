@@ -1020,7 +1020,7 @@ class _HomePageState extends State<HomePage> {
                                 Icon(CupertinoIcons.house_alt,
                                     color: const Color(0xFFC09A7D), size: 32),
                                 const SizedBox(height: 10),
-                                const Text('まだ使っている機器はないよ',
+                                const Text('使用している機器はありません',
                                     style: TextStyle(color: ink, fontSize: 14)),
                                 const SizedBox(height: 5),
                                 const Text('在庫棚から電池を選んで登録',
