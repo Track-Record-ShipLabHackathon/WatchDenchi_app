@@ -2017,8 +2017,8 @@ class _DisposalPageState extends State<DisposalPage> {
         error = null;
         loading = false;
       });
-    } catch (error) {
-      debugPrint('地域情報の読み込みに失敗: $error');
+    } catch (caught) {
+      debugPrint('地域情報の読み込みに失敗: $caught');
       if (!mounted) return;
       setState(() { loading = false; error = '地域を読み込めませんでした'; });
     }
