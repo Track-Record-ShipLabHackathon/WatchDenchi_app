@@ -1973,36 +1973,80 @@ class _DisposalPageState extends State<DisposalPage> {
     throw StateError('収集日を計算できませんでした');
   }
 
+  bool get hasVerifiedNahaSchedule =>
+      selectedMunicipality?.code == '47201' &&
+      (selectedDistrict?.code.startsWith('naha-makishi-') ?? false);
+
+  bool get isChatan => selectedMunicipality?.code == '47326';
+  String get areaLabel {
+    final city = selectedMunicipality?.name ?? '地域未設定';
+    return '$city・${selectedDistrict?.name ?? '地区未設定'}';
+  }
+  String get officialRegionUrl => isChatan
+      ? 'https://www.chatan.jp/seikatsuguide/gomi_recycle/shushu/shushubi.html'
+      : 'https://www.city.naha.okinawa.jp/kurasitetuduki/gomi-recycling/1001934/1008614.html';
+
+  DateTime? get officialNextCollectionDate =>
+      hasVerifiedNahaSchedule && selectedType != 'recharge'
+          ? nextNahaCollectionDate(DateTime.now())
+          : null;
+
   Future<void> loadSchedule() async {
-    // 他の地域から持ち込んだ古いデータを表示せず、公式表の対象地区に固定。
-    if (!mounted) return;
-    const target = DisposalAreaOption(
-        'naha-makishi-1', '牧志1丁目', 'まきしいっちょうめ');
-    setState(() {
-      selectedMunicipality =
-          DisposalAreaCatalog.findMunicipality('47201', '那覇市');
-      selectedDistrict = target;
-      registeredMunicipality = '那覇市';
-      registeredDistrict = target.name;
-      municipalityController.text = '那覇市';
-      districtController.text = target.name;
-      loading = false;
-      error = null;
-    });
+    try {
+      final data = await LocalBatteryStore.readDisposalSchedule();
+      final city = DisposalAreaCatalog.findMunicipality(
+        data['municipalityCode'] as String?, data['municipality'] as String?);
+      DisposalAreaOption? district;
+      if (city != null) {
+        for (final option in DisposalAreaCatalog.districtsFor(city.code)) {
+          if (option.code == data['districtCode'] ||
+              option.name == data['district']) {
+            district = option;
+            break;
+          }
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        selectedMunicipality = city;
+        selectedDistrict = district;
+        registeredMunicipality = city?.name ?? '';
+        registeredDistrict = district?.name;
+        municipalityController.text = city?.name ?? '';
+        districtController.text = district?.name ?? '';
+        error = null;
+        loading = false;
+      });
+    } catch (error) {
+      debugPrint('地域情報の読み込みに失敗: $error');
+      if (!mounted) return;
+      setState(() { loading = false; error = '地域を読み込めませんでした'; });
+    }
   }
 
   Future<void> chooseDate() async {
+    final location = areaLabel;
+    final description = hasVerifiedNahaSchedule
+        ? '那覇市公式日程では牧志1〜3丁目の乾電池・有害危険ごみは第2・4月曜日です。充電式電池は別区分なので公式案内を確認してください。'
+        : isChatan
+            ? '北谷町の有害ごみは地域の行政区ごとに収集曜日が異なります。正確な日付は北谷町公式の収集日案内で確認できます。'
+            : '地区別の収集日が確認できていないため、日付は推測していません。公式サイトでご確認ください。';
     await showCupertinoDialog<void>(
       context: context,
       builder: (dialogContext) => CupertinoAlertDialog(
-        title: const Text('那覇市・牧志1丁目の収集日'),
-        content: const Text(
-            '乾電池・コイン電池・充電式電池は毎月第2・第4月曜日が対象の収集日です。'
-            '回収区分と袋は種類によって異なります。臨時変更は那覇市公式サイトをご確認ください。'),
+        title: Text('$locationの回収情報'),
+        content: Text(description),
         actions: [
           CupertinoDialogAction(
             onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('閉じる'),
+          ),
+          CupertinoDialogAction(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              openOfficialGuide(officialRegionUrl);
+            },
+            child: const Text('公式サイト'),
           ),
         ],
       ),
@@ -2182,21 +2226,42 @@ class _DisposalPageState extends State<DisposalPage> {
   }
 
   List<String> get disposalSteps {
-    switch (selectedType) {
-      case 'dry':
-        return ['マンガン・アルカリ乾電池を区別してまとめる', '透明・半透明の袋で第2・4月曜日に出す'];
-      case 'coin':
-        return ['CR・BR形は電極をテープで絶縁', '乾電池と同じ収集日に透明袋で出す'];
-      case 'recharge':
-        return ['露出した金属端子をテープで絶縁', '乾電池と別袋に入れ「きけんごみ」で出す'];
-      default:
-        return ['電極を絶縁', '自治体の案内を確認する'];
+    if (isChatan) {
+      switch (selectedType) {
+        case 'dry':
+          return ['マンガン・アルカリ乾電池の電極をテープで絶縁',
+                  '透明な袋に入れて有害ごみの収集日に出す'];
+        case 'coin':
+          return ['コイン電池の両面をテープで絶縁する',
+                  '透明な袋に入れて有害ごみの収集日に出す'];
+        case 'recharge':
+          return ['充電式電池は通常のごみ収集に出さない',
+                  '北谷町保健相談センター窓口・回収協力店に持ち込む'];
+      }
     }
+    if (selectedMunicipality?.code == '47201') {
+      switch (selectedType) {
+        case 'dry':
+          return ['乾電池をほかのごみと分ける',
+                  '透明・半透明の袋で自治体指定の収集日に出す'];
+        case 'coin':
+          return ['CR・BR形の電極をテープで絶縁',
+                  '那覇市の指定する収集方法に従う'];
+        case 'recharge':
+          return ['露出した端子をテープで絶縁',
+                  '乾電池と別袋に入れて「きけんごみ」で出す'];
+      }
+    }
+    return ['電池の種類を確認する', '自治体の公式分別案内を確認する'];
   }
 
-  String get disposalFootnote => selectedType == 'recharge'
-      ? '那覇市では2026年3月から充電式電池の単体収集を開始。回収協力店への持ち込みも可能。'
-      : 'この案内は那覇市・牧志1丁目のみのルールです。';
+  String get disposalFootnote => isChatan
+      ? (selectedType == 'recharge'
+          ? '北谷町では充電式電池の窓口回収を実施。膨張・破損品も受付対象です。'
+          : '北谷町の有害ごみの収集日は行政区ごとに異なります。')
+      : (selectedType == 'recharge'
+          ? '那覇市では2026年3月から充電式電池をきけんごみで収集しています。'
+          : '那覇市公式の分別情報に基づく案内です。地区別の曜日は公式表をご確認ください。');
 
   Widget _guideStep(int number, String label) => Padding(
         padding: const EdgeInsets.only(bottom: 15),
@@ -2235,30 +2300,37 @@ class _DisposalPageState extends State<DisposalPage> {
   Future<void> _showDisposalMenu() async {
     final option = await showCupertinoModalPopup<String>(
       context: context,
-      builder: (menuContext) => CupertinoActionSheet(
-        title: const Text('那覇市・牧志1丁目'),
+      builder: (popupContext) => CupertinoActionSheet(
+        title: Text(areaLabel),
         actions: [
           CupertinoActionSheetAction(
-            onPressed: () => Navigator.of(menuContext).pop('collection'),
+            onPressed: () => Navigator.of(popupContext).pop('region'),
+            child: const Text('地域を変更する'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(popupContext).pop('date'),
             child: const Text('収集日について'),
           ),
           CupertinoActionSheetAction(
-            onPressed: () => Navigator.of(menuContext).pop('official'),
-            child: const Text('那覇市の公式案内'),
+            onPressed: () => Navigator.of(popupContext).pop('official'),
+            child: const Text('自治体の公式情報を見る'),
           ),
         ],
         cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.of(menuContext).pop(),
+          onPressed: () => Navigator.of(popupContext).pop(),
           child: const Text('キャンセル'),
         ),
       ),
     );
     if (!mounted) return;
-    if (option == 'collection') {
+    if (option == 'region') {
+      await Navigator.of(context).push<void>(
+        CupertinoPageRoute<void>(builder: (_) => const RegionSetupPage()));
+      if (mounted) await loadSchedule();
+    } else if (option == 'date') {
       await chooseDate();
     } else if (option == 'official') {
-      await openOfficialGuide(
-        'https://www.city.naha.okinawa.jp/kurasitetuduki/gomi-recycling/1001934/1008614.html');
+      await openOfficialGuide(officialRegionUrl);
     }
   }
 
@@ -2578,7 +2650,7 @@ class _DisposalPageState extends State<DisposalPage> {
 
   @override
   Widget build(BuildContext context) {
-    final next = nextNahaCollectionDate(DateTime.now());
+    final next = officialNextCollectionDate;
     final steps = disposalSteps;
     return CupertinoPageScaffold(
       backgroundColor: cream,
@@ -2607,16 +2679,20 @@ class _DisposalPageState extends State<DisposalPage> {
                     child: Row(children: [
                       const Icon(CupertinoIcons.location_solid, color: coral, size: 17),
                       const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text('那覇市・牧志1丁目  毎月第2・4月曜日',
-                            style: TextStyle(color: ink, fontSize: 12,
-                                fontWeight: FontWeight.w700)),
+                      Expanded(
+                        child: Text(
+                          hasVerifiedNahaSchedule && selectedType != 'recharge'
+                              ? '$areaLabel  毎月第2・4月曜日'
+                              : '$areaLabel  収集日は公式案内を確認',
+                          style: const TextStyle(color: ink, fontSize: 12,
+                              fontWeight: FontWeight.w700),
+                        ),
                       ),
                       CupertinoButton(
                         minSize: 0,
                         padding: const EdgeInsets.all(4),
                         onPressed: () => openOfficialGuide(
-                          'https://www.city.naha.okinawa.jp/kurasitetuduki/gomi-recycling/1001934/1008614.html',
+                          officialRegionUrl,
                         ),
                         child: const Icon(CupertinoIcons.link, size: 18, color: coral),
                       ),
