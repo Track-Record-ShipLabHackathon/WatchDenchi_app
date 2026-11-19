@@ -80,3 +80,5 @@ WatchDenchi_app/
 - [主要APIの仕様](docs/api.md)
 - [DB変更・Goのデプロイ手順](docs/device-api-deploy.md)
 - [Flutter担当者向けの接続指示](docs/flutter-integration.md)
+
+- [ローカルFlutter WebのCORS設定](docs/local-development.md)
