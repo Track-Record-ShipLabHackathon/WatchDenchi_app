@@ -1,8 +1,11 @@
 # API接続版の動作確認
 
-公開先: https://track-record-shiplabhackathon.github.io/WatchDenchi_app/api-preview/
+公開先（Go API接続版）: https://track-record-shiplabhackathon.github.io/WatchDenchi_app/
+旧API接続版URL（互換）: https://track-record-shiplabhackathon.github.io/WatchDenchi_app/api-preview/
+発表用ローカル保存版: https://track-record-shiplabhackathon.github.io/WatchDenchi_app/offline/
+iPhone枠つき発表用: https://track-record-shiplabhackathon.github.io/WatchDenchi_app/presentation.html
 
-通常の公開先は端末内保存です。API接続版はビルド時の
+通常の公開先はGo API接続版です。ローカル保存版は/offline/に独立して置いています。API接続版はビルド時の
 WATCHDENCHI_ENABLE_SERVER_AUTH と WATCHDENCHI_ENABLE_SERVER_INVENTORY を true にし、
 Go と PostgreSQL を使います。匿名トークンは既存の保存処理を再利用し、client_id は送りません。
 ローカル在庫をサーバーへ自動移行する処理はありません。
