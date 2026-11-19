@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="56" height="82" viewBox="0 0 56 82" role="img" aria-label="にこっと笑った乾電池のキャラクター">
+  <!-- WatchDenchi の既存在庫電池と同じく、色付きの上部・白い本体・プラス記号 -->
+  <rect x="20" y="2" width="16" height="9" rx="3" fill="#B6A49A" stroke="#85685A" stroke-width="2"/>
+  <rect x="8" y="9" width="40" height="69" rx="9" fill="#FFFDF8" stroke="#85685A" stroke-width="3"/>
+  <path d="M 10 18 Q 10 11 17 11 H 39 Q 46 11 46 18 V 36 H 10 Z" fill="#C9706A"/>
+  <path d="M 28 18 V 30 M 22 24 H 34" stroke="#FFFDF8" stroke-width="3.8" stroke-linecap="round"/>
+  <path d="M 12 40 V 65" stroke="#FFFFFF" stroke-opacity=".8" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="21.5" cy="53" r="2.1" fill="#5A4638"/>
+  <circle cx="34.5" cy="53" r="2.1" fill="#5A4638"/>
+  <path d="M 24 61 Q 28 65 32 61" fill="none" stroke="#5A4638" stroke-width="2.1" stroke-linecap="round"/>
+  <circle cx="16" cy="59" r="3.1" fill="#F5B4AF" fill-opacity=".6"/>
+  <circle cx="40" cy="59" r="3.1" fill="#F5B4AF" fill-opacity=".6"/>
+  <rect x="21" y="72" width="14" height="2" rx="1" fill="#B8A59B"/>
+</svg>

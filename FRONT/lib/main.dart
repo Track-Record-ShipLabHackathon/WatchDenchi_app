@@ -1500,6 +1500,10 @@ class _HomePageState extends State<HomePage> {
                           ),
                         if (activeDevices.isNotEmpty) ...[
                           const SizedBox(height: 10),
+                          const Text(
+                            '※ 色は設定した交換目安日による表示です。電池の残量ではありません。',
+                            style: TextStyle(color: mutedInk, fontSize: 11),
+                          ),
                         ],
                         const SizedBox(height: 25),
                       ]),
@@ -2049,11 +2053,13 @@ class _DisposalPageState extends State<DisposalPage> {
     final city = selectedMunicipality;
     if (city == null || municipalityController.text.trim() != city.name) {
       setState(() => error = '先に検索候補から市町村を選んでね');
+      await _showRegionSettings();
       return;
     }
     if (DisposalAreaCatalog.districtsFor(city.code).isNotEmpty &&
         selectedDistrict == null) {
       setState(() => error = '先に検索候補から収集地区を選んでね');
+      await _showRegionSettings();
       return;
     }
     final now = DateTime.now();
@@ -2333,17 +2339,145 @@ class _DisposalPageState extends State<DisposalPage> {
         ),
       );
 
-  @override
-  Widget build(BuildContext context) {
-    final cityHasChanged = selectedMunicipality?.name !=
-            registeredMunicipality ||
+  // 回収日画面の右上メニュー。カレンダー・種類・捨て方は常に画面に残す。
+  Future<void> _showDisposalMenu() async {
+    final option = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (menuContext) => CupertinoActionSheet(
+        title: const Text('回収日の設定・案内'),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(menuContext).pop('region'),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.location, color: coral, size: 20),
+                SizedBox(width: 9),
+                Text('お住まいの地域', style: TextStyle(color: ink)),
+              ],
+            ),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(menuContext).pop('official'),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.book, color: coral, size: 20),
+                SizedBox(width: 9),
+                Text('公式の案内', style: TextStyle(color: ink)),
+              ],
+            ),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(menuContext).pop(),
+          child: const Text('キャンセル'),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (option == 'region') {
+      await _showRegionSettings();
+    } else if (option == 'official') {
+      await _showOfficialGuides();
+    }
+  }
+
+  // もともとの地域検索・登録処理をそのまま使い、表示場所だけ移動する。
+  Future<void> _showRegionSettings() async {
+    await showCupertinoModalPopup<void>(
+      context: context,
+      builder: (popupContext) => StatefulBuilder(
+        builder: (sheetContext, sheetSetState) {
+          final keyboardHeight = MediaQuery.viewInsetsOf(sheetContext).bottom;
+          final usableHeight = MediaQuery.sizeOf(sheetContext).height - keyboardHeight;
+          return Padding(
+            padding: EdgeInsets.only(bottom: keyboardHeight),
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                width: double.infinity,
+                constraints: const BoxConstraints(maxWidth: 540),
+                height: usableHeight * 0.84,
+                decoration: const BoxDecoration(
+                  color: cream,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(27)),
+                ),
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(22, 17, 13, 9),
+                      child: Row(
+                        children: [
+                          const Expanded(
+                            child: Text('お住まいの地域', style: TextStyle(
+                              color: ink, fontSize: 20, fontWeight: FontWeight.w800,
+                              decoration: TextDecoration.none,
+                            )),
+                          ),
+                          CupertinoButton(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            onPressed: () => Navigator.of(popupContext).pop(),
+                            child: const Text('完了', style: TextStyle(
+                              color: coral, fontWeight: FontWeight.w700,
+                            )),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                        padding: const EdgeInsets.fromLTRB(22, 4, 22, 32),
+                        child: _buildRegionSettings(sheetContext, sheetSetState),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _showOfficialGuides() async {
+    await showCupertinoModalPopup<void>(
+      context: context,
+      builder: (popupContext) => CupertinoActionSheet(
+        title: const Text('公式の案内'),
+        message: const Text('電池の捨て方や回収場所は公式情報を確認してね。'),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.of(popupContext).pop();
+              openOfficialGuide('https://www.baj.or.jp/reuse_and_recycle/recycle/disposal.html');
+            },
+            child: const Text('電池工業会・捨て方ナビ'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.of(popupContext).pop();
+              openOfficialGuide('https://www.jbrc.com/general/recycle_kensaku/');
+            },
+            child: const Text('JBRC・回収協力店を探す'),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(popupContext).pop(),
+          child: const Text('閉じる'),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRegionSettings(BuildContext sheetContext, StateSetter sheetSetState) {
+    final cityHasChanged = selectedMunicipality?.name != registeredMunicipality ||
         selectedDistrict?.name != registeredDistrict;
     final availableDistricts = selectedMunicipality == null
         ? const <DisposalAreaOption>[]
         : DisposalAreaCatalog.districtsFor(selectedMunicipality!.code);
-    final regionReady = selectedMunicipality != null &&
-        (availableDistricts.isEmpty || selectedDistrict != null);
-    final next = regionReady ? dates[selectedType] : null;
     final citySuggestions = DisposalAreaCatalog.search(
         DisposalAreaCatalog.municipalities, municipalityController.text);
     final districtSuggestions = DisposalAreaCatalog.search(
@@ -2351,13 +2485,233 @@ class _DisposalPageState extends State<DisposalPage> {
     final savedRegionText = '保存したよ！ 沖縄県 ' +
         (selectedMunicipality?.name ?? '') +
         (selectedDistrict == null ? '' : '・' + selectedDistrict!.name);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+                  // 4. オートコンプリート：候補をタップして正規の地域IDを確定する。
+                  const _FieldTitle('お住まいの地域'),
+                  const SizedBox(height: 7),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 13),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3E8DB),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(CupertinoIcons.location_solid,
+                            size: 19, color: Color(0xFFCC706B)),
+                        SizedBox(width: 10),
+                        Expanded(child: Text('沖縄県',
+                            style: TextStyle(color: ink, fontSize: 15,
+                                fontWeight: FontWeight.w700))),
+                        Icon(CupertinoIcons.lock,
+                            size: 15, color: mutedInk),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  const Text('市町村を検索', style: TextStyle(
+                      color: ink, fontSize: 14, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 7),
+                  CupertinoTextField(
+                    controller: municipalityController,
+                    focusNode: municipalityFocus,
+                    placeholder: '例：那覇、なは、浦添…',
+                    prefix: const Padding(
+                      padding: EdgeInsets.only(left: 15, right: 9),
+                      child: Icon(CupertinoIcons.search,
+                          color: Color(0xFFCC706B), size: 20),
+                    ),
+                    suffix: selectedMunicipality == null
+                        ? null
+                        : const Padding(
+                            padding: EdgeInsets.only(right: 12),
+                            child: Icon(CupertinoIcons.check_mark_circled_solid,
+                                color: Color(0xFF6E9273), size: 19)),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFFDF9),
+                      borderRadius: BorderRadius.circular(17),
+                      border: Border.all(color: selectedMunicipality == null
+                          ? const Color(0xFFE6D9C8)
+                          : const Color(0xFF9EC2A5)),
+                    ),
+                    style: const TextStyle(color: ink, fontSize: 15),
+                    onTap: () {
+                      setState(() => citySuggestionsVisible = true);
+                      sheetSetState(() {});
+                    },
+                    onChanged: (_) {
+                      setState(() {
+                      selectedMunicipality = null;
+                      selectedDistrict = null;
+                      districtController.clear();
+                      citySuggestionsVisible = true;
+                      districtSuggestionsVisible = false;
+                      saved = false;
+                      error = null;
+                    });
+                    sheetSetState(() {});
+                  },
+                  ),
+                  if (citySuggestionsVisible && selectedMunicipality == null)
+                    if (citySuggestions.isNotEmpty)
+                      _suggestionList(citySuggestions, (option) {
+                        _selectMunicipality(option);
+                        sheetSetState(() {});
+                      })
+                    else
+                      const Padding(
+                        padding: EdgeInsets.only(top: 9),
+                        child: Text('一致する市町村がありません。名前の一部で検索してね。',
+                            style: TextStyle(color: mutedInk, fontSize: 12)),
+                      ),
+                  if (selectedMunicipality != null) ...[
+                    const SizedBox(height: 16),
+                    const Text('収集地区を検索', style: TextStyle(
+                        color: ink, fontSize: 14,
+                        fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 7),
+                    if (availableDistricts.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 15, vertical: 15),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFDF9),
+                          borderRadius: BorderRadius.circular(17),
+                          border: Border.all(color: const Color(0xFFE6D9C8)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(CupertinoIcons.search,
+                                size: 19, color: mutedInk),
+                            SizedBox(width: 10),
+                            Expanded(child: Text('地区データを準備中',
+                                style: TextStyle(color: mutedInk,
+                                    fontSize: 14))),
+                            Icon(CupertinoIcons.clock,
+                                color: mutedInk, size: 17),
+                          ],
+                        ),
+                      )
+                    else ...[
+                      CupertinoTextField(
+                        controller: districtController,
+                        focusNode: districtFocus,
+                        placeholder: '地区名の一部を入力',
+                        prefix: const Padding(
+                          padding: EdgeInsets.only(left: 15, right: 9),
+                          child: Icon(CupertinoIcons.search,
+                              color: Color(0xFFCC706B), size: 20),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFDF9),
+                          borderRadius: BorderRadius.circular(17),
+                          border: Border.all(color: const Color(0xFFE6D9C8)),
+                        ),
+                        onTap: () {
+                            setState(() => districtSuggestionsVisible = true);
+                            sheetSetState(() {});
+                          },
+                        onChanged: (_) {
+                      setState(() {
+                          selectedDistrict = null;
+                          districtSuggestionsVisible = true;
+                          saved = false;
+                          error = null;
+                        });
+                        sheetSetState(() {});
+                      },
+                      ),
+                      if (districtSuggestionsVisible && selectedDistrict == null)
+                        if (districtSuggestions.isNotEmpty)
+                          _suggestionList(districtSuggestions, (option) {
+                            _selectDistrict(option);
+                            sheetSetState(() {});
+                          })
+                        else
+                          const Padding(
+                            padding: EdgeInsets.only(top: 9),
+                            child: Text('該当する地区がありません。',
+                                style: TextStyle(color: mutedInk,
+                                    fontSize: 12)),
+                          ),
+                    ],
+                    const SizedBox(height: 9),
+                    Text(availableDistricts.isEmpty
+                        ? '地区別データは未接続。今は市町村だけ登録できるよ。回収日は自動表示されません。'
+                        : '地区を候補から選ぶと、地域が確定するよ。',
+                        style: const TextStyle(color: mutedInk,
+                            fontSize: 11.5, height: 1.5)),
+                  ],
+                  if (cityHasChanged && registeredMunicipality.isNotEmpty) ...[
+                    const SizedBox(height: 9),
+                    const Text('地域を変更する場合、以前の回収予定日は引き継がれないよ。',
+                        style: TextStyle(color: coral, fontSize: 12)),
+                  ],
+                  const SizedBox(height: 10),
+                  const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(CupertinoIcons.lock, size: 13, color: mutedInk),
+                      SizedBox(width: 7),
+                      Expanded(child: Text('番地・部屋番号は不要。地域はこの端末に保存されるよ。',
+                          style: TextStyle(color: mutedInk,
+                              fontSize: 11.5, fontWeight: FontWeight.w600))),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  if (error != null) ...[
+                    Text(error!, style: const TextStyle(
+                        color: coral, fontSize: 12)),
+                    const SizedBox(height: 10),
+                  ],
+                  SizedBox(
+                    width: double.infinity,
+                    child: CupertinoButton.filled(
+                      onPressed: saving || selectedMunicipality == null ||
+                              (availableDistricts.isNotEmpty &&
+                               selectedDistrict == null)
+                          ? null : () async {
+                              final task = saveSchedule();
+                              sheetSetState(() {});
+                              await task;
+                              if (sheetContext.mounted) sheetSetState(() {});
+                            },
+                      child: Text(saving ? '保存中…' : 'この地域を保存する'),
+                    ),
+                  ),
+                  if (saved) ...[
+                    const SizedBox(height: 9),
+                    Center(child: Text(
+                        savedRegionText,
+                        style: const TextStyle(color: Color(0xFF6E9273),
+                            fontSize: 13, fontWeight: FontWeight.w700))),
+                  ],
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final availableDistricts = selectedMunicipality == null
+        ? const <DisposalAreaOption>[]
+        : DisposalAreaCatalog.districtsFor(selectedMunicipality!.code);
+    final regionReady = selectedMunicipality != null &&
+        (availableDistricts.isEmpty || selectedDistrict != null);
+    final next = regionReady ? dates[selectedType] : null;
     final steps = disposalSteps;
     return CupertinoPageScaffold(
       backgroundColor: cream,
       child: SafeArea(
         child: loading
             ? const Center(child: CupertinoActivityIndicator())
-            : ListView(
+            : Stack(
+                children: [
+                  ListView(
                 padding: const EdgeInsets.fromLTRB(20, 22, 20, 45),
                 children: [
                   // 1. 日めくりカレンダーを画面の最上部に。ここから日付を変更できる。
@@ -2475,225 +2829,29 @@ class _DisposalPageState extends State<DisposalPage> {
                     ),
                   ),
                   const SizedBox(height: 22),
-                  // 4. オートコンプリート：候補をタップして正規の地域IDを確定する。
-                  const _FieldTitle('お住まいの地域'),
-                  const SizedBox(height: 7),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 13),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF3E8DB),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(CupertinoIcons.location_solid,
-                            size: 19, color: Color(0xFFCC706B)),
-                        SizedBox(width: 10),
-                        Expanded(child: Text('沖縄県',
-                            style: TextStyle(color: ink, fontSize: 15,
-                                fontWeight: FontWeight.w700))),
-                        Icon(CupertinoIcons.lock,
-                            size: 15, color: mutedInk),
-                      ],
-                    ),
+                ],
                   ),
-                  const SizedBox(height: 15),
-                  const Text('市町村を検索', style: TextStyle(
-                      color: ink, fontSize: 14, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 7),
-                  CupertinoTextField(
-                    controller: municipalityController,
-                    focusNode: municipalityFocus,
-                    placeholder: '例：那覇、なは、浦添…',
-                    prefix: const Padding(
-                      padding: EdgeInsets.only(left: 15, right: 9),
-                      child: Icon(CupertinoIcons.search,
-                          color: Color(0xFFCC706B), size: 20),
-                    ),
-                    suffix: selectedMunicipality == null
-                        ? null
-                        : const Padding(
-                            padding: EdgeInsets.only(right: 12),
-                            child: Icon(CupertinoIcons.check_mark_circled_solid,
-                                color: Color(0xFF6E9273), size: 19)),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFFDF9),
-                      borderRadius: BorderRadius.circular(17),
-                      border: Border.all(color: selectedMunicipality == null
-                          ? const Color(0xFFE6D9C8)
-                          : const Color(0xFF9EC2A5)),
-                    ),
-                    style: const TextStyle(color: ink, fontSize: 15),
-                    onTap: () => setState(() => citySuggestionsVisible = true),
-                    onChanged: (_) => setState(() {
-                      selectedMunicipality = null;
-                      selectedDistrict = null;
-                      districtController.clear();
-                      citySuggestionsVisible = true;
-                      districtSuggestionsVisible = false;
-                      saved = false;
-                      error = null;
-                    }),
-                  ),
-                  if (citySuggestionsVisible && selectedMunicipality == null)
-                    if (citySuggestions.isNotEmpty)
-                      _suggestionList(citySuggestions, _selectMunicipality)
-                    else
-                      const Padding(
-                        padding: EdgeInsets.only(top: 9),
-                        child: Text('一致する市町村がありません。名前の一部で検索してね。',
-                            style: TextStyle(color: mutedInk, fontSize: 12)),
-                      ),
-                  if (selectedMunicipality != null) ...[
-                    const SizedBox(height: 16),
-                    const Text('収集地区を検索', style: TextStyle(
-                        color: ink, fontSize: 14,
-                        fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 7),
-                    if (availableDistricts.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 15, vertical: 15),
+                  Positioned(
+                    top: 0,
+                    right: 15,
+                    child: Semantics(
+                      label: '回収日の設定・案内',
+                      button: true,
+                      child: Container(
+                        width: 44,
+                        height: 44,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFFDF9),
-                          borderRadius: BorderRadius.circular(17),
+                          color: paper,
+                          shape: BoxShape.circle,
                           border: Border.all(color: const Color(0xFFE6D9C8)),
                         ),
-                        child: const Row(
-                          children: [
-                            Icon(CupertinoIcons.search,
-                                size: 19, color: mutedInk),
-                            SizedBox(width: 10),
-                            Expanded(child: Text('地区データを準備中',
-                                style: TextStyle(color: mutedInk,
-                                    fontSize: 14))),
-                            Icon(CupertinoIcons.clock,
-                                color: mutedInk, size: 17),
-                          ],
+                        child: CupertinoButton(
+                          padding: EdgeInsets.zero,
+                          onPressed: _showDisposalMenu,
+                          child: const Icon(CupertinoIcons.ellipsis,
+                              color: ink, size: 24),
                         ),
-                      )
-                    else ...[
-                      CupertinoTextField(
-                        controller: districtController,
-                        focusNode: districtFocus,
-                        placeholder: '地区名の一部を入力',
-                        prefix: const Padding(
-                          padding: EdgeInsets.only(left: 15, right: 9),
-                          child: Icon(CupertinoIcons.search,
-                              color: Color(0xFFCC706B), size: 20),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFFDF9),
-                          borderRadius: BorderRadius.circular(17),
-                          border: Border.all(color: const Color(0xFFE6D9C8)),
-                        ),
-                        onTap: () => setState(() =>
-                            districtSuggestionsVisible = true),
-                        onChanged: (_) => setState(() {
-                          selectedDistrict = null;
-                          districtSuggestionsVisible = true;
-                          saved = false;
-                          error = null;
-                        }),
                       ),
-                      if (districtSuggestionsVisible && selectedDistrict == null)
-                        if (districtSuggestions.isNotEmpty)
-                          _suggestionList(districtSuggestions, _selectDistrict)
-                        else
-                          const Padding(
-                            padding: EdgeInsets.only(top: 9),
-                            child: Text('該当する地区がありません。',
-                                style: TextStyle(color: mutedInk,
-                                    fontSize: 12)),
-                          ),
-                    ],
-                    const SizedBox(height: 9),
-                    Text(availableDistricts.isEmpty
-                        ? '地区別データは未接続。今は市町村だけ登録できるよ。回収日は自動表示されません。'
-                        : '地区を候補から選ぶと、地域が確定するよ。',
-                        style: const TextStyle(color: mutedInk,
-                            fontSize: 11.5, height: 1.5)),
-                  ],
-                  if (cityHasChanged && registeredMunicipality.isNotEmpty) ...[
-                    const SizedBox(height: 9),
-                    const Text('地域を変更する場合、以前の回収予定日は引き継がれないよ。',
-                        style: TextStyle(color: coral, fontSize: 12)),
-                  ],
-                  const SizedBox(height: 10),
-                  const Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(CupertinoIcons.lock, size: 13, color: mutedInk),
-                      SizedBox(width: 7),
-                      Expanded(child: Text('番地・部屋番号は不要。地域はこの端末に保存されるよ。',
-                          style: TextStyle(color: mutedInk,
-                              fontSize: 11.5, fontWeight: FontWeight.w600))),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  if (error != null) ...[
-                    Text(error!, style: const TextStyle(
-                        color: coral, fontSize: 12)),
-                    const SizedBox(height: 10),
-                  ],
-                  SizedBox(
-                    width: double.infinity,
-                    child: CupertinoButton.filled(
-                      onPressed: saving || selectedMunicipality == null ||
-                              (availableDistricts.isNotEmpty &&
-                               selectedDistrict == null)
-                          ? null : saveSchedule,
-                      child: Text(saving ? '保存中…' : 'この地域を保存する'),
-                    ),
-                  ),
-                  if (saved) ...[
-                    const SizedBox(height: 9),
-                    Center(child: Text(
-                        savedRegionText,
-                        style: const TextStyle(color: Color(0xFF6E9273),
-                            fontSize: 13, fontWeight: FontWeight.w700))),
-                  ],
-                  const SizedBox(height: 20),
-                  const SizedBox(height: 26),
-                  const Text('公式の案内',
-                      style: TextStyle(
-                          color: ink, fontSize: 16,
-                          fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 9),
-                  CupertinoButton(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    color: paper,
-                    borderRadius: BorderRadius.circular(13),
-                    onPressed: () => openOfficialGuide(
-                        'https://www.baj.or.jp/reuse_and_recycle/recycle/disposal.html'),
-                    child: const Row(
-                      children: [
-                        Expanded(child: Text('電池工業会・捨て方ナビ',
-                            style: TextStyle(color: ink, fontSize: 13))),
-                        Icon(CupertinoIcons.chevron_right,
-                            color: mutedInk, size: 18),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 9),
-                  CupertinoButton(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    color: paper,
-                    borderRadius: BorderRadius.circular(13),
-                    onPressed: () => openOfficialGuide(
-                        'https://www.jbrc.com/general/recycle_kensaku/'),
-                    child: const Row(
-                      children: [
-                        Expanded(child: Text('JBRC・回収協力店を探す',
-                            style: TextStyle(color: ink, fontSize: 13))),
-                        Icon(CupertinoIcons.chevron_right,
-                            color: mutedInk, size: 18),
-                      ],
                     ),
                   ),
                 ],
@@ -3939,7 +4097,7 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
                 else
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 7),
-                    child: Text('一致する機器はまだないよ',
+                    child: Text('一致する機器はありません',
                         style: TextStyle(color: mutedInk, fontSize: 12)),
                   ),
               ],
@@ -4494,7 +4652,7 @@ class PickupTearOffCalendar extends StatelessWidget {
             ),
             SizedBox(height: 19 * scale),
             Text(
-              '回収日未設定',
+              '回収日はまだ未設定',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: _brown,
