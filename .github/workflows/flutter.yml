@@ -39,16 +39,28 @@ jobs:
       - name: Test Flutter
         run: flutter test --no-pub
 
-      - name: Build Flutter Web
+      # The canonical URL is the Go + PostgreSQL + Python connected app.
+      - name: Build Flutter Web (connected)
         run: >-
           flutter build web
           --no-pub
           --base-href /WatchDenchi_app/
           --dart-define=WATCHDENCHI_API_BASE_URL=https://watchdenchi-app.onrender.com
-          --dart-define=WATCHDENCHI_ENABLE_SERVER_AUTH=false
+          --dart-define=WATCHDENCHI_ENABLE_SERVER_AUTH=true
+          --dart-define=WATCHDENCHI_ENABLE_SERVER_INVENTORY=true
 
-      # Separate build: keep server inventory disabled on the normal page.
-      # Both paths share the Origin allowed by the Go server.
+      # Preserve a separate server-independent presentation fallback.
+      - name: Build offline version
+        run: >-
+          flutter build web
+          --no-pub
+          --output build/offline
+          --base-href /WatchDenchi_app/offline/
+          --dart-define=WATCHDENCHI_API_BASE_URL=https://watchdenchi-app.onrender.com
+          --dart-define=WATCHDENCHI_ENABLE_SERVER_AUTH=false
+          --dart-define=WATCHDENCHI_ENABLE_SERVER_INVENTORY=false
+
+      # Keep the old API-preview URL available for existing links.
       - name: Build API preview
         run: >-
           flutter build web
@@ -59,10 +71,11 @@ jobs:
           --dart-define=WATCHDENCHI_ENABLE_SERVER_AUTH=true
           --dart-define=WATCHDENCHI_ENABLE_SERVER_INVENTORY=true
 
-      - name: Include API preview in Pages artifact
+      - name: Include separate builds in Pages artifact
         run: |
-          mkdir -p build/web/api-preview
+          mkdir -p build/web/api-preview build/web/offline
           cp -R build/api-preview/. build/web/api-preview/
+          cp -R build/offline/. build/web/offline/
 
       - name: Upload site
         if: github.event_name == 'push'
