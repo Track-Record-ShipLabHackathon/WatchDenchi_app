@@ -82,8 +82,7 @@ class _SplashPageState extends State<SplashPage>
       await Future.wait<Object?>([
         LocalBatteryStore.readInventory(),
         LocalBatteryStore.readDevices(),
-        if (enableServerAnonymousAuth)
-          WatchDenchiServerServices.auth.restoreOrCreate(),
+        // 認証サーバーが止まっていても起動できる公開版。
       ]);
     } catch (error) {
       debugPrint('起動時のデータ確認に失敗: $error');
@@ -105,6 +104,7 @@ class _SplashPageState extends State<SplashPage>
       'WATCHDENCHI_PREVIEW_REGION_SETUP', defaultValue: false,
     );
     if (kDebugMode && previewRegionSetup) needsRegionSetup = true;
+    needsRegionSetup = false; // 地域は那覇市・牧志1丁目に固定する
     await introDuration;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
@@ -195,10 +195,7 @@ class _SplashPageState extends State<SplashPage>
 // Go APIで試験する場合だけON。通常は既存のローカルUIと保存を維持する。
 // 現行Go APIには「保管場所変更/使用開始/交換」がまだないため、
 // 試験モードではこれらの操作を明示的に止め、DBとローカルの二重管理を避ける。
-const bool enableServerInventory = bool.fromEnvironment(
-  'WATCHDENCHI_ENABLE_SERVER_INVENTORY',
-  defaultValue: false,
-);
+const bool enableServerInventory = false; // 安定版は端末内保存のみ
 
 // 電池と機器のデータ
 class BatteryEntry {
@@ -240,23 +237,20 @@ class BatteryEntry {
 
 // 発表用の画面確認: 実際の電池残量・Pythonの予測日ではない。
 // 通常は「未設定」。?demoBadges=1 でサンプルの色分けを表示する。
+// 状態はユーザーの手入力値。実測値やAI予測値ではない。
 class _PresentationBatteryStatusBadge extends StatelessWidget {
-  const _PresentationBatteryStatusBadge({required this.deviceIndex});
-  final int deviceIndex;
+  const _PresentationBatteryStatusBadge({required this.status});
+  final String status;
 
   @override
   Widget build(BuildContext context) {
-    final demo = Uri.base.queryParameters['demoBadges'] == '1';
-    final status = demo
-        ? const ['安心', '準備', '交換', '未設定'][deviceIndex % 4]
-        : '未設定';
     final fill = switch (status) {
       '安心' => const Color(0xFF68A678),
       '準備' => const Color(0xFFE6AD36),
       '交換' => const Color(0xFFD86B64),
       _ => const Color(0xFF9B958F),
     };
-    final batteryLevel = switch (status) {
+    final level = switch (status) {
       '安心' => 3,
       '準備' => 1,
       _ => 0,
@@ -268,21 +262,16 @@ class _PresentationBatteryStatusBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(50),
         border: Border.all(color: paper, width: 1.5),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (status != '未設定') ...[
-            _PresentationTinyBattery(level: batteryLevel),
-            const SizedBox(width: 4),
-          ],
-          Text(status,
-              style: const TextStyle(
-                color: CupertinoColors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-              )),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (status != '未設定') ...[
+          _PresentationTinyBattery(level: level),
+          const SizedBox(width: 4),
         ],
-      ),
+        Text(status, style: const TextStyle(
+          color: CupertinoColors.white, fontSize: 10,
+          fontWeight: FontWeight.w700,
+        )),
+      ]),
     );
   }
 }
@@ -337,6 +326,7 @@ class DeviceUsage {
     this.status = 'active',
     this.endedAt,
     this.manualReplacementAt,
+    this.batteryStatus = '未設定',
   });
 
   final String deviceName;
@@ -352,6 +342,14 @@ class DeviceUsage {
   // 旧ローカルデータの読み込み互換性のためだけに保持する。
   // 手入力の日付は表示しない。将来のPython予測日とは別項目。
   final DateTime? manualReplacementAt;
+  final String batteryStatus;
+
+  DeviceUsage withBatteryStatus(String value) => DeviceUsage(
+    deviceName: deviceName, type: type, manufacturer: manufacturer,
+    quantity: quantity, startedAt: startedAt, iconKey: iconKey,
+    status: status, endedAt: endedAt,
+    manualReplacementAt: manualReplacementAt, batteryStatus: value,
+  );
 
   bool get isActive => status == 'active';
 
@@ -365,6 +363,7 @@ class DeviceUsage {
         status: 'inactive',
         endedAt: endTime,
         manualReplacementAt: manualReplacementAt,
+        batteryStatus: batteryStatus,
       );
 
   Map<String, dynamic> toJson() => {
@@ -377,6 +376,7 @@ class DeviceUsage {
         'status': status,
         'endedAt': endedAt?.toIso8601String(),
         'manualReplacementAt': manualReplacementAt?.toIso8601String(),
+        'batteryStatus': batteryStatus,
       };
 
   factory DeviceUsage.fromJson(Map<String, dynamic> json) => DeviceUsage(
@@ -391,6 +391,10 @@ class DeviceUsage {
         endedAt: DateTime.tryParse(json['endedAt'] as String? ?? ''),
         manualReplacementAt:
             DateTime.tryParse(json['manualReplacementAt'] as String? ?? ''),
+        batteryStatus: const ['安心', '準備', '交換', '未設定']
+                .contains(json['batteryStatus'])
+            ? json['batteryStatus'] as String
+            : '未設定',
       );
 }
 
@@ -1061,15 +1065,19 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // 使用中の機器をタップしたときは「電池を交換する」だけを表示する。
-  // 手入力の交換目安日と使用終了操作はUIから廃止。
+  // 電池交換と手入力ステータスを両方操作できる。
   Future<void> openDeviceActions(DeviceUsage usage) async {
     final action = await showCupertinoModalPopup<String>(
       context: context,
       builder: (popupContext) => CupertinoActionSheet(
         title: Text(usage.deviceName),
-        message: Text('${usage.type}・${usage.quantity}本・${usage.manufacturer}'),
+        message: Text(usage.type + '・' + usage.quantity.toString() + '本・' +
+          usage.manufacturer + '　現在：' + usage.batteryStatus),
         actions: [
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(popupContext).pop('status'),
+            child: const Text('電池の状態を設定する'),
+          ),
           CupertinoActionSheetAction(
             onPressed: () => Navigator.of(popupContext).pop('replace'),
             child: const Text('電池を交換する'),
@@ -1082,7 +1090,45 @@ class _HomePageState extends State<HomePage> {
       ),
     );
     if (!mounted) return;
-    if (action == 'replace') await chooseReplacement(usage);
+    if (action == 'status') {
+      await setDeviceBatteryStatus(usage);
+    } else if (action == 'replace') {
+      await chooseReplacement(usage);
+    }
+  }
+
+  Future<void> setDeviceBatteryStatus(DeviceUsage usage) async {
+    final chosen = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (popupContext) => CupertinoActionSheet(
+        title: Text(usage.deviceName + 'の電池の状態'),
+        message: const Text('使用状況をもとに手入力する状態です。残量や交換日を自動計測したものではありません。'),
+        actions: [
+          for (final state in const ['安心', '準備', '交換', '未設定'])
+            CupertinoActionSheetAction(
+              onPressed: () => Navigator.of(popupContext).pop(state),
+              child: Text(state),
+            ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(popupContext).pop(),
+          child: const Text('キャンセル'),
+        ),
+      ),
+    );
+    if (!mounted || chosen == null) return;
+    final index = devices.indexOf(usage);
+    if (index < 0) return;
+    final next = List<DeviceUsage>.from(devices);
+    next[index] = usage.withBatteryStatus(chosen);
+    try {
+      await LocalBatteryStore.saveDevices(next);
+      if (!mounted) return;
+      setState(() => devices = next);
+    } catch (error) {
+      if (!mounted) return;
+      await showError(context, '状態を保存できませんでした。');
+    }
   }
 
   // 新しい電池を在庫棚から選び、同じ機器の使用履歴を継続する
@@ -1329,7 +1375,7 @@ class _HomePageState extends State<HomePage> {
                                                       top: -7,
                                                       right: -8,
                                                       child: _PresentationBatteryStatusBadge(
-                                                        deviceIndex: activeDevices.indexOf(usage),
+                                                        status: usage.batteryStatus,
                                                       ),
                                                     ),
                                                   ],
@@ -1357,11 +1403,6 @@ class _HomePageState extends State<HomePage> {
                               );
                             },
                           ),
-                        if (Uri.base.queryParameters['demoBadges'] == '1') ...[
-                          const SizedBox(height: 10),
-                          const Text('※ 発表用のサンプル表示です。実際の残量や予測結果ではありません。',
-                              style: TextStyle(color: mutedInk, fontSize: 11)),
-                        ],
                         const SizedBox(height: 25),
                       ]),
                     ),
