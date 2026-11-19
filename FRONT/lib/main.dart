@@ -75,44 +75,20 @@ class _SplashPageState extends State<SplashPage>
   }
 
   Future<void> _prepareAndEnter() async {
-    // 初回のみ地域設定画面に進む。すでに保存済みの地域は再入力させない。
+    // 公開版でも毎回地域選択から始める。保存済み地域は候補欄に復元する。
     final introDuration = Future<void>.delayed(const Duration(milliseconds: 3000));
-    var needsRegionSetup = true;
     try {
       await Future.wait<Object?>([
         LocalBatteryStore.readInventory(),
         LocalBatteryStore.readDevices(),
-        // 認証サーバーが止まっていても起動できる公開版。
       ]);
     } catch (error) {
-      debugPrint('起動時のデータ確認に失敗: $error');
+      debugPrint('起動時の保存データ確認に失敗: $error');
     }
-    try {
-      final saved = await LocalBatteryStore.readDisposalSchedule();
-      final oldRegion = DisposalAreaCatalog.findMunicipality(
-        saved['municipalityCode'] as String?,
-        saved['municipality'] as String?,
-      );
-      final hasSkipped = await LocalBatteryStore.hasSeenRegionSetup();
-      needsRegionSetup = oldRegion == null && !hasSkipped;
-    } catch (error) {
-      debugPrint('地域の初回設定確認に失敗: $error');
-    }
-    // 既存データがある開発端末で、初回画面を確認するための任意フラグ。
-    // 通常起動・本番ビルドではfalse。
-    const previewRegionSetup = bool.fromEnvironment(
-      'WATCHDENCHI_PREVIEW_REGION_SETUP', defaultValue: false,
-    );
-    if (kDebugMode && previewRegionSetup) needsRegionSetup = true;
-    needsRegionSetup = false; // 地域は那覇市・牧志1丁目に固定する
     await introDuration;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      CupertinoPageRoute<void>(
-        builder: (_) => needsRegionSetup
-            ? const RegionSetupPage()
-            : const MainTabsPage(),
-      ),
+      CupertinoPageRoute<void>(builder: (_) => const RegionSetupPage()),
     );
   }
 
@@ -1490,9 +1466,34 @@ class DisposalAreaCatalog {
   // キーは上の市町村コード。値はその市町村の収集地区候補。
   // 例のダミー地区は登録しない。確認できた正式な地区のみ追加する。
   // データ形式: '47201': [DisposalAreaOption('地区ID', '地区名', 'ふりがな')],
+  // 実際に分別ルールを案内できる自治体だけを初期画面に表示する。
+  static const List<DisposalAreaOption> supportedMunicipalities = [
+    DisposalAreaOption('47201', '那覇市', 'なはし'),
+    DisposalAreaOption('47326', '北谷町', 'ちゃたんちょう'),
+  ];
+
   static const Map<String, List<DisposalAreaOption>> districtsByCityCode = {
     '47201': [
       DisposalAreaOption('naha-makishi-1', '牧志1丁目', 'まきしいっちょうめ'),
+      DisposalAreaOption('naha-makishi-2', '牧志2丁目', 'まきしにちょうめ'),
+      DisposalAreaOption('naha-makishi-3', '牧志3丁目', 'まきしさんちょうめ'),
+      DisposalAreaOption('naha-omoromachi-1', 'おもろまち1丁目', 'おもろまちいっちょうめ'),
+      DisposalAreaOption('naha-omoromachi-2', 'おもろまち2丁目', 'おもろまちにちょうめ'),
+      DisposalAreaOption('naha-omoromachi-3', 'おもろまち3丁目', 'おもろまちさんちょうめ'),
+      DisposalAreaOption('naha-omoromachi-4', 'おもろまち4丁目', 'おもろまちよんちょうめ'),
+      DisposalAreaOption('naha-oroku-1', '小禄1丁目', 'おろくいっちょうめ'),
+      DisposalAreaOption('naha-oroku-2', '小禄2丁目', 'おろくにちょうめ'),
+      DisposalAreaOption('naha-oroku-3', '小禄3丁目', 'おろくさんちょうめ'),
+    ],
+    '47326': [
+      DisposalAreaOption('chatan-mihama-1', '美浜1丁目', 'みはまいっちょうめ'),
+      DisposalAreaOption('chatan-mihama-2', '美浜2丁目', 'みはまにちょうめ'),
+      DisposalAreaOption('chatan-mihama-3', '美浜3丁目', 'みはまさんちょうめ'),
+      DisposalAreaOption('chatan-chatan-1', '北谷1丁目', 'ちゃたんいっちょうめ'),
+      DisposalAreaOption('chatan-chatan-2', '北谷2丁目', 'ちゃたんにちょうめ'),
+      DisposalAreaOption('chatan-kuwae-1', '桑江1丁目', 'くわえいっちょうめ'),
+      DisposalAreaOption('chatan-ihei-1', '伊平1丁目', 'いへいいっちょうめ'),
+      DisposalAreaOption('chatan-ihei-2', '伊平2丁目', 'いへいにちょうめ'),
     ],
   };
 
@@ -1533,6 +1534,42 @@ class _RegionSetupPageState extends State<RegionSetupPage> {
   bool _showDistrictCandidates = false;
   bool _saving = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreRegion();
+  }
+
+  Future<void> _restoreRegion() async {
+    try {
+      final saved = await LocalBatteryStore.readDisposalSchedule();
+      final previous = DisposalAreaCatalog.findMunicipality(
+        saved['municipalityCode'] as String?,
+        saved['municipality'] as String?,
+      );
+      if (previous == null ||
+          !DisposalAreaCatalog.supportedMunicipalities
+              .any((item) => item.code == previous.code)) return;
+      DisposalAreaOption? district;
+      for (final option in DisposalAreaCatalog.districtsFor(previous.code)) {
+        if (option.code == saved['districtCode'] ||
+            option.name == saved['district']) {
+          district = option;
+          break;
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _city = previous;
+        _district = district;
+        _cityController.text = previous.name;
+        _districtController.text = district?.name ?? '';
+      });
+    } catch (error) {
+      debugPrint('保存済み地域を復元できませんでした: $error');
+    }
+  }
 
   @override
   void dispose() {
@@ -1610,21 +1647,6 @@ class _RegionSetupPageState extends State<RegionSetupPage> {
     }
   }
 
-  Future<void> _skip() async {
-    setState(() => _saving = true);
-    try {
-      await LocalBatteryStore.markRegionSetupSeen();
-      if (!mounted) return;
-      _enterHome();
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _saving = false;
-        _error = '設定を保存できませんでした。もう一度試してね。';
-      });
-    }
-  }
-
   Widget _suggestions(
     List<DisposalAreaOption> options,
     void Function(DisposalAreaOption) onSelect,
@@ -1669,7 +1691,7 @@ class _RegionSetupPageState extends State<RegionSetupPage> {
   @override
   Widget build(BuildContext context) {
     final cityOptions = DisposalAreaCatalog.search(
-        DisposalAreaCatalog.municipalities, _cityController.text);
+        DisposalAreaCatalog.supportedMunicipalities, _cityController.text);
     final districts = _city == null
         ? const <DisposalAreaOption>[]
         : DisposalAreaCatalog.districtsFor(_city!.code);
@@ -1741,9 +1763,25 @@ class _RegionSetupPageState extends State<RegionSetupPage> {
               ),
             ),
             const SizedBox(height: 21),
-            const Text('市町村を検索',
+            const Text('市町村を選択',
                 style: TextStyle(color: ink, fontWeight: FontWeight.w700)),
             const SizedBox(height: 7),
+            Row(children: [
+              for (final city in DisposalAreaCatalog.supportedMunicipalities) ...[
+                Expanded(child: CupertinoButton(
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  color: _city?.code == city.code ? coral : paper,
+                  borderRadius: BorderRadius.circular(14),
+                  onPressed: () => _chooseCity(city),
+                  child: Text(city.name, style: TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w700,
+                    color: _city?.code == city.code ? CupertinoColors.white : ink,
+                  )),
+                )),
+                if (city.code == '47201') const SizedBox(width: 9),
+              ],
+            ]),
+            const SizedBox(height: 12),
             CupertinoTextField(
               controller: _cityController,
               focusNode: _cityFocus,
@@ -1778,7 +1816,7 @@ class _RegionSetupPageState extends State<RegionSetupPage> {
                 _error = null;
               }),
             ),
-            if (_showCityCandidates && _city == null)
+            if (_showCityCandidates)
               if (cityOptions.isNotEmpty)
                 _suggestions(cityOptions, _chooseCity)
               else
@@ -1832,7 +1870,7 @@ class _RegionSetupPageState extends State<RegionSetupPage> {
                     _error = null;
                   }),
                 ),
-                if (_showDistrictCandidates && _district == null)
+                if (_showDistrictCandidates || _district == null)
                   if (districtOptions.isNotEmpty)
                     _suggestions(districtOptions, _chooseDistrict)
                   else
@@ -1858,13 +1896,7 @@ class _RegionSetupPageState extends State<RegionSetupPage> {
               onPressed: _saving || !canRegister ? null : _registerRegion,
               child: Text(_saving ? '保存中…' : 'この地域で始める'),
             ),
-            const SizedBox(height: 7),
-            CupertinoButton(
-              onPressed: _saving ? null : _skip,
-              child: const Text('あとで登録する',
-                  style: TextStyle(color: mutedInk, fontSize: 14)),
-            ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 13),
             const Text('回収日・処分方法は公式情報が確認できた地域だけ表示するよ。',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: mutedInk, fontSize: 11)),
