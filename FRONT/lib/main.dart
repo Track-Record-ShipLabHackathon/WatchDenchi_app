@@ -3025,53 +3025,6 @@ class _InventoryPageState extends State<InventoryPage> {
     );
     if (!mounted || request == null) return;
 
-    if (enableServerInventory) {
-      if (_serverMutationInFlight) return;
-      if (request.iconKey != 'mouse') {
-        await showError(context, 'API接続版の交換目安はマウスに対応しています。マウスを選択してください。');
-        return;
-      }
-      if (entry.id == null) {
-        await showError(context, '在庫を読み直してください');
-        return;
-      }
-      setState(() => _serverMutationInFlight = true);
-      try {
-        await WatchDenchiServerServices.auth.restoreOrCreate();
-        final api = WatchDenchiServerServices.api;
-        if (_pendingDeviceId == null || _pendingDeviceName != request.deviceName) {
-          // 装着失敗後も未設定の機器を再利用し、機器だけが増えるのを防ぐ。
-          final existing = await api.getDevices();
-          final installed = await api.getDeviceBatteries();
-          final usedIds = installed.map((row) => row['device_id']).toSet();
-          Map<String, dynamic>? reusable;
-          for (final row in existing) {
-            if (row['name'] == request.deviceName && row['type'] == 'マウス' &&
-                !usedIds.contains(row['id'])) {
-              reusable = row;
-              break;
-            }
-          }
-          final device = reusable ?? await api.createDevice(
-            type: 'マウス', name: request.deviceName);
-          _pendingDeviceId = device['id'] as int;
-          _pendingDeviceName = request.deviceName;
-        }
-        await api.installDeviceBattery(deviceId: _pendingDeviceId!,
-          batteryId: entry.id!, batteryQuantity: request.quantity);
-        _pendingDeviceId = null;
-        _pendingDeviceName = null;
-        await loadEntries();
-      } catch (error) {
-        if (!mounted) return;
-        await showError(context, '装着を確認できませんでした。在庫と機器を確認してから再操作してください。\n' + error.toString());
-        await loadEntries();
-      } finally {
-        if (mounted) setState(() => _serverMutationInFlight = false);
-      }
-      return;
-    }
-
     final index = entries.indexOf(entry);
     if (index == -1 || request.quantity < 1 ||
         request.quantity > entry.quantity) return;
@@ -3137,6 +3090,54 @@ class _InventoryPageState extends State<InventoryPage> {
       builder: (_) => UseBatterySheet(entry: entry),
     );
     if (!mounted || request == null) return;
+
+    if (enableServerInventory) {
+      if (_serverMutationInFlight) return;
+      if (request.iconKey != 'mouse') {
+        await showError(context, 'API接続版の交換目安はマウスに対応しています。マウスを選択してください。');
+        return;
+      }
+      if (entry.id == null) {
+        await showError(context, '在庫を読み直してください');
+        return;
+      }
+      setState(() => _serverMutationInFlight = true);
+      try {
+        await WatchDenchiServerServices.auth.restoreOrCreate();
+        final api = WatchDenchiServerServices.api;
+        if (_pendingDeviceId == null || _pendingDeviceName != request.deviceName) {
+          // 装着失敗後も未設定の機器を再利用し、機器だけが増えるのを防ぐ。
+          final existing = await api.getDevices();
+          final installed = await api.getDeviceBatteries();
+          final usedIds = installed.map((row) => row['device_id']).toSet();
+          Map<String, dynamic>? reusable;
+          for (final row in existing) {
+            if (row['name'] == request.deviceName && row['type'] == 'マウス' &&
+                !usedIds.contains(row['id'])) {
+              reusable = row;
+              break;
+            }
+          }
+          final device = reusable ?? await api.createDevice(
+            type: 'マウス', name: request.deviceName);
+          _pendingDeviceId = device['id'] as int;
+          _pendingDeviceName = request.deviceName;
+        }
+        await api.installDeviceBattery(deviceId: _pendingDeviceId!,
+          batteryId: entry.id!, batteryQuantity: request.quantity);
+        _pendingDeviceId = null;
+        _pendingDeviceName = null;
+        await loadEntries();
+      } catch (error) {
+        if (!mounted) return;
+        await showError(context, '装着を確認できませんでした。在庫と機器を確認してから再操作してください。\n' + error.toString());
+        await loadEntries();
+      } finally {
+        if (mounted) setState(() => _serverMutationInFlight = false);
+      }
+      return;
+    }
+
 
     final index = entries.indexOf(entry);
     if (index == -1 || request.quantity > entry.quantity) return;
