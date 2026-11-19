@@ -82,8 +82,7 @@ class _SplashPageState extends State<SplashPage>
       await Future.wait<Object?>([
         LocalBatteryStore.readInventory(),
         LocalBatteryStore.readDevices(),
-        if (enableServerAnonymousAuth)
-          WatchDenchiServerServices.auth.restoreOrCreate(),
+        // 認証サーバーが止まっていても起動できる公開版。
       ]);
     } catch (error) {
       debugPrint('起動時のデータ確認に失敗: $error');
@@ -105,6 +104,7 @@ class _SplashPageState extends State<SplashPage>
       'WATCHDENCHI_PREVIEW_REGION_SETUP', defaultValue: false,
     );
     if (kDebugMode && previewRegionSetup) needsRegionSetup = true;
+    needsRegionSetup = false; // 地域は那覇市・牧志1丁目に固定する
     await introDuration;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
@@ -195,10 +195,7 @@ class _SplashPageState extends State<SplashPage>
 // Go APIで試験する場合だけON。通常は既存のローカルUIと保存を維持する。
 // 現行Go APIには「保管場所変更/使用開始/交換」がまだないため、
 // 試験モードではこれらの操作を明示的に止め、DBとローカルの二重管理を避ける。
-const bool enableServerInventory = bool.fromEnvironment(
-  'WATCHDENCHI_ENABLE_SERVER_INVENTORY',
-  defaultValue: false,
-);
+const bool enableServerInventory = false; // 安定版は端末内保存のみ
 
 // 電池と機器のデータ
 class BatteryEntry {
@@ -238,6 +235,86 @@ class BatteryEntry {
       );
 }
 
+// 発表用の画面確認: 実際の電池残量・Pythonの予測日ではない。
+// 通常は「未設定」。?demoBadges=1 でサンプルの色分けを表示する。
+// 状態はユーザーの手入力値。実測値やAI予測値ではない。
+class _PresentationBatteryStatusBadge extends StatelessWidget {
+  const _PresentationBatteryStatusBadge({required this.status});
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final fill = switch (status) {
+      '安心' => const Color(0xFF68A678),
+      '準備' => const Color(0xFFE6AD36),
+      '交換' => const Color(0xFFD86B64),
+      _ => const Color(0xFF9B958F),
+    };
+    final level = switch (status) {
+      '安心' => 3,
+      '準備' => 1,
+      _ => 0,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(50),
+        border: Border.all(color: paper, width: 1.5),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (status != '未設定') ...[
+          _PresentationTinyBattery(level: level),
+          const SizedBox(width: 4),
+        ],
+        Text(status, style: const TextStyle(
+          color: CupertinoColors.white, fontSize: 10,
+          fontWeight: FontWeight.w700,
+        )),
+      ]),
+    );
+  }
+}
+
+class _PresentationTinyBattery extends StatelessWidget {
+  const _PresentationTinyBattery({required this.level});
+  final int level;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 15, height: 9,
+            padding: const EdgeInsets.all(1.6),
+            decoration: BoxDecoration(
+              border: Border.all(color: CupertinoColors.white, width: 1.2),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: level == 0 ? 0.13 : level / 3,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: CupertinoColors.white,
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Container(
+            width: 2, height: 4,
+            decoration: const BoxDecoration(
+              color: CupertinoColors.white,
+              borderRadius: BorderRadius.horizontal(right: Radius.circular(1)),
+            ),
+          ),
+        ],
+      );
+}
+
 class DeviceUsage {
   const DeviceUsage({
     required this.deviceName,
@@ -249,6 +326,7 @@ class DeviceUsage {
     this.status = 'active',
     this.endedAt,
     this.manualReplacementAt,
+    this.batteryStatus = '未設定',
   });
 
   final String deviceName;
@@ -264,6 +342,14 @@ class DeviceUsage {
   // 旧ローカルデータの読み込み互換性のためだけに保持する。
   // 手入力の日付は表示しない。将来のPython予測日とは別項目。
   final DateTime? manualReplacementAt;
+  final String batteryStatus;
+
+  DeviceUsage withBatteryStatus(String value) => DeviceUsage(
+    deviceName: deviceName, type: type, manufacturer: manufacturer,
+    quantity: quantity, startedAt: startedAt, iconKey: iconKey,
+    status: status, endedAt: endedAt,
+    manualReplacementAt: manualReplacementAt, batteryStatus: value,
+  );
 
   bool get isActive => status == 'active';
 
@@ -277,6 +363,7 @@ class DeviceUsage {
         status: 'inactive',
         endedAt: endTime,
         manualReplacementAt: manualReplacementAt,
+        batteryStatus: batteryStatus,
       );
 
   Map<String, dynamic> toJson() => {
@@ -289,6 +376,7 @@ class DeviceUsage {
         'status': status,
         'endedAt': endedAt?.toIso8601String(),
         'manualReplacementAt': manualReplacementAt?.toIso8601String(),
+        'batteryStatus': batteryStatus,
       };
 
   factory DeviceUsage.fromJson(Map<String, dynamic> json) => DeviceUsage(
@@ -303,6 +391,10 @@ class DeviceUsage {
         endedAt: DateTime.tryParse(json['endedAt'] as String? ?? ''),
         manualReplacementAt:
             DateTime.tryParse(json['manualReplacementAt'] as String? ?? ''),
+        batteryStatus: const ['安心', '準備', '交換', '未設定']
+                .contains(json['batteryStatus'])
+            ? json['batteryStatus'] as String
+            : '未設定',
       );
 }
 
@@ -973,15 +1065,19 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // 使用中の機器をタップしたときは「電池を交換する」だけを表示する。
-  // 手入力の交換目安日と使用終了操作はUIから廃止。
+  // 電池交換と手入力ステータスを両方操作できる。
   Future<void> openDeviceActions(DeviceUsage usage) async {
     final action = await showCupertinoModalPopup<String>(
       context: context,
       builder: (popupContext) => CupertinoActionSheet(
         title: Text(usage.deviceName),
-        message: Text('${usage.type}・${usage.quantity}本・${usage.manufacturer}'),
+        message: Text(usage.type + '・' + usage.quantity.toString() + '本・' +
+          usage.manufacturer + '　現在：' + usage.batteryStatus),
         actions: [
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(popupContext).pop('status'),
+            child: const Text('電池の状態を設定する'),
+          ),
           CupertinoActionSheetAction(
             onPressed: () => Navigator.of(popupContext).pop('replace'),
             child: const Text('電池を交換する'),
@@ -994,7 +1090,45 @@ class _HomePageState extends State<HomePage> {
       ),
     );
     if (!mounted) return;
-    if (action == 'replace') await chooseReplacement(usage);
+    if (action == 'status') {
+      await setDeviceBatteryStatus(usage);
+    } else if (action == 'replace') {
+      await chooseReplacement(usage);
+    }
+  }
+
+  Future<void> setDeviceBatteryStatus(DeviceUsage usage) async {
+    final chosen = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (popupContext) => CupertinoActionSheet(
+        title: Text(usage.deviceName + 'の電池の状態'),
+        message: const Text('使用状況をもとに手入力する状態です。残量や交換日を自動計測したものではありません。'),
+        actions: [
+          for (final state in const ['安心', '準備', '交換', '未設定'])
+            CupertinoActionSheetAction(
+              onPressed: () => Navigator.of(popupContext).pop(state),
+              child: Text(state),
+            ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.of(popupContext).pop(),
+          child: const Text('キャンセル'),
+        ),
+      ),
+    );
+    if (!mounted || chosen == null) return;
+    final index = devices.indexOf(usage);
+    if (index < 0) return;
+    final next = List<DeviceUsage>.from(devices);
+    next[index] = usage.withBatteryStatus(chosen);
+    try {
+      await LocalBatteryStore.saveDevices(next);
+      if (!mounted) return;
+      setState(() => devices = next);
+    } catch (error) {
+      if (!mounted) return;
+      await showError(context, '状態を保存できませんでした。');
+    }
   }
 
   // 新しい電池を在庫棚から選び、同じ機器の使用履歴を継続する
@@ -1211,20 +1345,40 @@ class _HomePageState extends State<HomePage> {
                                           child: Column(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              // 予測APIの結果が来るまではステータスバッジを表示しない。
-                                              Container(
-                                                width: 80,
-                                                height: 80,
-                                                alignment: Alignment.center,
-                                                decoration: BoxDecoration(
-                                                  color: paleCoral,
-                                                  borderRadius: BorderRadius.circular(25),
-                                                  border: Border.all(color: const Color(0xFFF0CCC5)),
-                                                ),
-                                                child: Icon(
-                                                  resolvedDeviceIcon(usage.iconKey).icon,
-                                                  color: coral,
-                                                  size: 39,
+                                              // 元の機器アイコンと重ねて右上に電池ステータスを配置。
+                                              SizedBox(
+                                                width: 82,
+                                                height: 85,
+                                                child: Stack(
+                                                  clipBehavior: Clip.none,
+                                                  children: [
+                                                    Positioned(
+                                                      left: 1,
+                                                      bottom: 0,
+                                                      child: Container(
+                                                        width: 80,
+                                                        height: 80,
+                                                        alignment: Alignment.center,
+                                                        decoration: BoxDecoration(
+                                                          color: paleCoral,
+                                                          borderRadius: BorderRadius.circular(25),
+                                                          border: Border.all(color: const Color(0xFFF0CCC5)),
+                                                        ),
+                                                        child: Icon(
+                                                          resolvedDeviceIcon(usage.iconKey).icon,
+                                                          color: coral,
+                                                          size: 39,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    Positioned(
+                                                      top: -7,
+                                                      right: -8,
+                                                      child: _PresentationBatteryStatusBadge(
+                                                        status: usage.batteryStatus,
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
                                               const SizedBox(height: 9),
@@ -1333,7 +1487,11 @@ class DisposalAreaCatalog {
   // キーは上の市町村コード。値はその市町村の収集地区候補。
   // 例のダミー地区は登録しない。確認できた正式な地区のみ追加する。
   // データ形式: '47201': [DisposalAreaOption('地区ID', '地区名', 'ふりがな')],
-  static const Map<String, List<DisposalAreaOption>> districtsByCityCode = {};
+  static const Map<String, List<DisposalAreaOption>> districtsByCityCode = {
+    '47201': [
+      DisposalAreaOption('naha-makishi-1', '牧志1丁目', 'まきしいっちょうめ'),
+    ],
+  };
 
   static List<DisposalAreaOption> search(
       List<DisposalAreaOption> options, String query) {
@@ -1767,108 +1925,51 @@ class _DisposalPageState extends State<DisposalPage> {
     super.dispose();
   }
 
-  Future<void> loadSchedule() async {
-    try {
-      final data = await LocalBatteryStore.readDisposalSchedule();
-      if (!mounted) return;
-      final savedDates = data['dates'];
-      setState(() {
-        registeredMunicipality = data['municipality'] as String? ?? '';
-        registeredDistrict = data['district'] as String?;
-        // 以前の自由入力データは候補と完全一致した場合のみ復元。
-        selectedMunicipality = DisposalAreaCatalog.findMunicipality(
-          data['municipalityCode'] as String?, registeredMunicipality,
-        );
-        municipalityController.text =
-            selectedMunicipality?.name ?? registeredMunicipality;
-        final availableDistricts = selectedMunicipality == null
-            ? const <DisposalAreaOption>[]
-            : DisposalAreaCatalog.districtsFor(selectedMunicipality!.code);
-        for (final item in availableDistricts) {
-          if (item.code == data['districtCode'] ||
-              (data['districtCode'] == null && item.name == registeredDistrict)) {
-            selectedDistrict = item;
-            break;
-          }
-        }
-        districtController.text = selectedDistrict?.name ?? '';
-        if (savedDates is Map) {
-          for (final entry in savedDates.entries) {
-            final date = DateTime.tryParse(entry.value.toString());
-            if (date != null) dates[entry.key.toString()] = date;
-          }
-        }
-        loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        error = '回収日の読み込みに失敗しました';
-        loading = false;
-      });
+  // 那覇市公式収集日表：牧志1〜3丁目、もやさないごみ・危険ごみ・乾電池は第2・4月曜。
+  static DateTime nextNahaCollectionDate(DateTime now) {
+    final today = DateTime(now.year, now.month, now.day);
+    for (var offset = 0; offset < 65; offset++) {
+      final date = today.add(Duration(days: offset));
+      final nth = ((date.day - 1) ~/ 7) + 1;
+      if (date.weekday == DateTime.monday && (nth == 2 || nth == 4)) {
+        return date;
+      }
     }
+    throw StateError('収集日を計算できませんでした');
+  }
+
+  Future<void> loadSchedule() async {
+    // 他の地域から持ち込んだ古いデータを表示せず、公式表の対象地区に固定。
+    if (!mounted) return;
+    const target = DisposalAreaOption(
+        'naha-makishi-1', '牧志1丁目', 'まきしいっちょうめ');
+    setState(() {
+      selectedMunicipality =
+          DisposalAreaCatalog.findMunicipality('47201', '那覇市');
+      selectedDistrict = target;
+      registeredMunicipality = '那覇市';
+      registeredDistrict = target.name;
+      municipalityController.text = '那覇市';
+      districtController.text = target.name;
+      loading = false;
+      error = null;
+    });
   }
 
   Future<void> chooseDate() async {
-    final city = selectedMunicipality;
-    if (city == null || municipalityController.text.trim() != city.name) {
-      setState(() => error = '先に検索候補から市町村を選んでね');
-      await _showRegionSettings();
-      return;
-    }
-    if (DisposalAreaCatalog.districtsFor(city.code).isNotEmpty &&
-        selectedDistrict == null) {
-      setState(() => error = '先に検索候補から収集地区を選んでね');
-      await _showRegionSettings();
-      return;
-    }
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    DateTime chosen = dates[selectedType] ?? today.add(const Duration(days: 7));
-    if (chosen.isBefore(today)) chosen = today;
-    await showCupertinoModalPopup<void>(
+    await showCupertinoDialog<void>(
       context: context,
-      builder: (popupContext) => Container(
-        height: 345,
-        color: paper,
-        child: SafeArea(
-          top: false,
-          child: Column(
-            children: [
-              SizedBox(
-                height: 52,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    CupertinoButton(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      onPressed: () {
-                        setState(() {
-                          dates[selectedType] = chosen;
-                          saved = false;
-                          error = null;
-                        });
-                        Navigator.of(popupContext).pop();
-                      },
-                      child: const Text('決定',
-                          style: TextStyle(color: coral,
-                              fontWeight: FontWeight.w700)),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: CupertinoDatePicker(
-                  mode: CupertinoDatePickerMode.date,
-                  initialDateTime: chosen,
-                  minimumDate: today,
-                  maximumDate: DateTime(today.year + 3, today.month, today.day),
-                  onDateTimeChanged: (value) => chosen = value,
-                ),
-              ),
-            ],
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: const Text('那覇市・牧志1丁目の収集日'),
+        content: const Text(
+            '乾電池・コイン電池・充電式電池は毎月第2・第4月曜日が対象の収集日です。'
+            '回収区分と袋は種類によって異なります。臨時変更は那覇市公式サイトをご確認ください。'),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('閉じる'),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -2048,19 +2149,19 @@ class _DisposalPageState extends State<DisposalPage> {
   List<String> get disposalSteps {
     switch (selectedType) {
       case 'dry':
-        return ['＋と−をテープで絶縁', '自治体のルールで出す'];
+        return ['マンガン・アルカリ乾電池を区別してまとめる', '透明・半透明の袋で第2・4月曜日に出す'];
       case 'coin':
-        return ['表裏の電極をテープで絶縁', '自治体の指定方法で出す'];
+        return ['CR・BR形は電極をテープで絶縁', '乾電池と同じ収集日に透明袋で出す'];
       case 'recharge':
-        return ['端子をテープで絶縁', '回収対象を確認して持ち込む'];
+        return ['露出した金属端子をテープで絶縁', '乾電池と別袋に入れ「きけんごみ」で出す'];
       default:
         return ['電極を絶縁', '自治体の案内を確認する'];
     }
   }
 
   String get disposalFootnote => selectedType == 'recharge'
-      ? '膨張・破損した電池は回収箱に入れず、回収先に相談'
-      : '分別・回収場所は自治体や回収店の案内を優先';
+      ? '那覇市では2026年3月から充電式電池の単体収集を開始。回収協力店への持ち込みも可能。'
+      : 'この案内は那覇市・牧志1丁目のみのルールです。';
 
   Widget _guideStep(int number, String label) => Padding(
         padding: const EdgeInsets.only(bottom: 15),
@@ -2100,29 +2201,15 @@ class _DisposalPageState extends State<DisposalPage> {
     final option = await showCupertinoModalPopup<String>(
       context: context,
       builder: (menuContext) => CupertinoActionSheet(
-        title: const Text('回収日の設定・案内'),
+        title: const Text('那覇市・牧志1丁目'),
         actions: [
           CupertinoActionSheetAction(
-            onPressed: () => Navigator.of(menuContext).pop('region'),
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(CupertinoIcons.location, color: coral, size: 20),
-                SizedBox(width: 9),
-                Text('お住まいの地域', style: TextStyle(color: ink)),
-              ],
-            ),
+            onPressed: () => Navigator.of(menuContext).pop('collection'),
+            child: const Text('収集日について'),
           ),
           CupertinoActionSheetAction(
             onPressed: () => Navigator.of(menuContext).pop('official'),
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(CupertinoIcons.book, color: coral, size: 20),
-                SizedBox(width: 9),
-                Text('公式の案内', style: TextStyle(color: ink)),
-              ],
-            ),
+            child: const Text('那覇市の公式案内'),
           ),
         ],
         cancelButton: CupertinoActionSheetAction(
@@ -2132,14 +2219,16 @@ class _DisposalPageState extends State<DisposalPage> {
       ),
     );
     if (!mounted) return;
-    if (option == 'region') {
-      await _showRegionSettings();
+    if (option == 'collection') {
+      await chooseDate();
     } else if (option == 'official') {
-      await _showOfficialGuides();
+      await openOfficialGuide(
+        'https://www.city.naha.okinawa.jp/kurasitetuduki/gomi-recycling/1001934/1008614.html');
     }
   }
 
   // もともとの地域検索・登録処理をそのまま使い、表示場所だけ移動する。
+  // ignore: unused_element
   Future<void> _showRegionSettings() async {
     await showCupertinoModalPopup<void>(
       context: context,
@@ -2198,6 +2287,7 @@ class _DisposalPageState extends State<DisposalPage> {
     );
   }
 
+  // ignore: unused_element
   Future<void> _showOfficialGuides() async {
     await showCupertinoModalPopup<void>(
       context: context,
@@ -2453,12 +2543,7 @@ class _DisposalPageState extends State<DisposalPage> {
 
   @override
   Widget build(BuildContext context) {
-    final availableDistricts = selectedMunicipality == null
-        ? const <DisposalAreaOption>[]
-        : DisposalAreaCatalog.districtsFor(selectedMunicipality!.code);
-    final regionReady = selectedMunicipality != null &&
-        (availableDistricts.isEmpty || selectedDistrict != null);
-    final next = regionReady ? dates[selectedType] : null;
+    final next = nextNahaCollectionDate(DateTime.now());
     final steps = disposalSteps;
     return CupertinoPageScaffold(
       backgroundColor: cream,
@@ -2475,6 +2560,32 @@ class _DisposalPageState extends State<DisposalPage> {
                     date: next,
                     batteryType: selectedBatteryLabel,
                     onEdit: chooseDate,
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+                    decoration: BoxDecoration(
+                      color: paper,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE6D9C8)),
+                    ),
+                    child: Row(children: [
+                      const Icon(CupertinoIcons.location_solid, color: coral, size: 17),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text('那覇市・牧志1丁目  毎月第2・4月曜日',
+                            style: TextStyle(color: ink, fontSize: 12,
+                                fontWeight: FontWeight.w700)),
+                      ),
+                      CupertinoButton(
+                        minSize: 0,
+                        padding: const EdgeInsets.all(4),
+                        onPressed: () => openOfficialGuide(
+                          'https://www.city.naha.okinawa.jp/kurasitetuduki/gomi-recycling/1001934/1008614.html',
+                        ),
+                        child: const Icon(CupertinoIcons.link, size: 18, color: coral),
+                      ),
+                    ]),
                   ),
                   const SizedBox(height: 22),
                   // 2. 電池の種類（画像と同じ横並びの丸いタブ）

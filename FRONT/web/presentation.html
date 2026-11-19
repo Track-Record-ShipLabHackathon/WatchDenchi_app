@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f4eee6">
+  <title>WatchDenchi | iPhone発表プレビュー</title>
+  <meta name="description" content="WatchDenchiをiPhoneの画面内で実演できる発表用ビューです。">
+  <style>
+    :root {
+      color-scheme: light;
+      --cream: #f5efe6;
+      --ink: #624b42;
+      --coral: #da6f69;
+      --device-w: 430px;
+      --device-h: 932px;
+      --device-border: 12px;
+      --device-outer-w: 454px;
+      --device-outer-h: 956px;
+      --phone-scale: .7;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background: radial-gradient(ellipse at 45% 35%, #fefaf4 0%, #f3eae1 54%, #eaded4 100%);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100dvh;
+    }
+    .page {
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 17px;
+      padding: 18px 16px 28px;
+    }
+    .toolbar {
+      width: min(610px, 100%);
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .brand { display: flex; gap: 10px; align-items: center; }
+    .brandmark {
+      width: 29px; height: 42px; border-radius: 5px; position: relative;
+      background: linear-gradient(to bottom, #dc7570 0 30%, #fefaf6 30%);
+      border: 2px solid #bb9990; box-shadow: inset 0 -5px #e2cfc3;
+    }
+    .brandmark:before { content: ''; position: absolute; width: 10px; height: 4px; background: #a88c82; border-radius: 2px; left: 7px; top: -6px; }
+    .brandmark:after { content: '+'; position: absolute; color: white; font-weight: 800; font-size: 22px; line-height: 1; top: 1px; left: 5px; }
+    .brand strong { display: block; font-size: 17px; letter-spacing: .025em; }
+    .brand small { display: block; color: #947b70; font-size: 10px; margin-top: 1px; }
+    .actions { display: flex; align-items: center; gap: 7px; }
+    button, .action-link {
+      appearance: none;
+      border: 1px solid #decbbd;
+      background: #fffaf5;
+      color: #73574b;
+      border-radius: 11px;
+      padding: 9px 12px;
+      line-height: 1.2;
+      text-decoration: none;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      min-height: 36px;
+    }
+    button:hover, .action-link:hover { background: #fce9e4; }
+    button:focus-visible, a:focus-visible { outline: 3px solid #e58f7d; outline-offset: 2px; }
+    .stage {
+      width: 318px;
+      height: 669px;
+      flex: none;
+      position: relative;
+    }
+    .phone {
+      width: var(--device-outer-w);
+      height: var(--device-outer-h);
+      position: absolute;
+      inset: 0 auto auto 0;
+      transform: scale(var(--phone-scale));
+      transform-origin: top left;
+      border: var(--device-border) solid #191819;
+      border-radius: 65px;
+      background: #161515;
+      box-shadow: 0 0 0 1px #79716e, 0 20px 55px #5c483b36, 0 5px 12px #53443820;
+    }
+    .phone::before, .phone::after {
+      content: '';
+      position: absolute;
+      background: #5f5654;
+      width: 4px;
+      border-radius: 3px;
+      left: -16px;
+      z-index: -1;
+    }
+    .phone::before { top: 140px; height: 46px; }
+    .phone::after { top: 213px; height: 75px; }
+    .screen {
+      position: absolute;
+      inset: 0;
+      border-radius: 51px;
+      overflow: hidden;
+      background: var(--cream);
+    }
+    .status {
+      height: 59px;
+      position: absolute;
+      left: 0; top: 0; right: 0;
+      z-index: 3;
+      background: var(--cream);
+      color: #171516;
+      pointer-events: none;
+      user-select: none;
+    }
+    .status-clock {
+      position: absolute;
+      top: 19px;
+      left: 36px;
+      font-size: 15px;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-weight: 700;
+      line-height: 20px;
+      letter-spacing: .1px;
+    }
+    .status-icons {
+      position: absolute;
+      top: 23px;
+      right: 30px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-icons svg { display: block; }
+    .island {
+      position: absolute;
+      width: 125px;
+      height: 37px;
+      top: 11px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #020202;
+      border-radius: 30px;
+      z-index: 5;
+      pointer-events: none;
+      box-shadow: inset 0 1px 1px #27272a;
+    }
+    .island:after {
+      content: '';
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 66% 40%, #303543 0%, #10131c 30%, #060608 72%);
+    }
+    .app-frame {
+      border: 0;
+      position: absolute;
+      width: 100%;
+      top: 59px;
+      bottom: 34px;
+      height: calc(100% - 93px);
+      left: 0;
+      background: var(--cream);
+      display: block;
+    }
+    .home-area {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 34px;
+      background: var(--cream);
+      z-index: 3;
+      pointer-events: none;
+    }
+    .home-indicator {
+      position: absolute;
+      left: 50%; bottom: 11px;
+      width: 139px; height: 5px;
+      transform: translateX(-50%);
+      background: #8d817b;
+      opacity: .65;
+      border-radius: 5px;
+    }
+    .hint { font-size: 11px; color: #927c71; text-align: center; margin: 0; max-width: 540px; line-height: 1.5; }
+    .fit-note { display: none; }
+    @media (max-width: 560px) {
+      .toolbar { justify-content: center; }
+      .brand { display: none; }
+      .actions { justify-content: center; }
+      .page { gap: 10px; padding: 9px 6px 14px; }
+      .hint { font-size: 10px; }
+    }
+    @media print {
+      body { background: white; }
+      .toolbar, .hint { display: none; }
+      .page { padding: 0; justify-content: center; }
+      .phone { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page" id="presentation">
+    <div class="toolbar" id="toolbar">
+      <div class="brand" aria-label="WatchDenchi 発表用">
+        <span class="brandmark" aria-hidden="true"></span>
+        <span><strong>WatchDenchi</strong><small>iPhone presentation view</small></span>
+      </div>
+      <div class="actions">
+        <button id="fit" type="button" title="画面に収まる大きさに戻す">サイズを合わせる</button>
+        <button id="reload" type="button" title="アプリ画面を再読み込み">再読み込み</button>
+        <button id="fullscreen" type="button" title="発表用に全画面で表示">全画面表示</button>
+      </div>
+    </div>
+    <div class="stage" id="stage">
+      <div class="phone" aria-label="iPhone 14 Pro Maxサイズのアプリ実演プレビュー">
+        <div class="screen">
+          <div class="status" aria-label="iPhone風ステータスバー（模擬表示）">
+            <time class="status-clock" id="clock">9:41</time>
+            <div class="status-icons" aria-hidden="true">
+              <svg width="19" height="13" viewBox="0 0 19 13"><rect x="1" y="9" width="3" height="4" rx="1" fill="currentColor"/><rect x="6" y="7" width="3" height="6" rx="1" fill="currentColor"/><rect x="11" y="4" width="3" height="9" rx="1" fill="currentColor"/><rect x="16" y="1" width="3" height="12" rx="1" fill="currentColor"/></svg>
+              <svg width="17" height="13" viewBox="0 0 17 13"><path d="M1 4C5 .6 12 .6 16 4M3.3 6.6c3-2.6 7.4-2.6 10.4 0M6.1 9.1c1.4-1 3.4-1 4.8 0" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" fill="none"/><circle cx="8.5" cy="11.5" r="1.3" fill="currentColor"/></svg>
+              <svg width="27" height="13" viewBox="0 0 27 13"><rect x="1" y="1" width="22" height="11" rx="3.1" stroke="currentColor" stroke-width="1.2" fill="none"/><rect x="3.3" y="3.2" width="17.2" height="6.6" rx="1.6" fill="currentColor"/><path d="M24.4 4.3c1.7.7 2.1 3.7 0 4.4z" fill="currentColor"/></svg>
+            </div>
+          </div>
+          <div class="island" aria-hidden="true"></div>
+          <iframe class="app-frame" id="watchdenchi-app" title="WatchDenchi 操作可能なFlutterアプリ" src="./" loading="eager" allow="fullscreen"></iframe>
+          <div class="home-area" aria-hidden="true"><div class="home-indicator"></div></div>
+        </div>
+      </div>
+    </div>
+    <p class="hint" id="hint">アプリの中身は実際のWatchDenchiです。上部の時刻・電波・iPhoneの枠は発表用の模擬表示です。</p>
+  </main>
+  <script>
+    (() => {
+      'use strict';
+      const page = document.getElementById('presentation');
+      const stage = document.getElementById('stage');
+      const frame = document.getElementById('watchdenchi-app');
+      const clock = document.getElementById('clock');
+      const fitButton = document.getElementById('fit');
+      const reloadButton = document.getElementById('reload');
+      const fullscreenButton = document.getElementById('fullscreen');
+      const params = new URLSearchParams(window.location.search);
+      // 同じ公開先のFlutterアプリを埋め込むため、別ドメインのURLは受け取りません。
+      // ?app=/WatchDenchi_app/ のような同一オリジンのパスは指定できます。
+      const appPath = params.get('app');
+      if (appPath) {
+        try {
+          const resolved = new URL(appPath, location.href);
+          if (resolved.origin === location.origin && resolved.pathname !== location.pathname) {
+            frame.src = resolved.href;
+          }
+        } catch (_) { /* 元の相対URLを使用 */ }
+      }
+      function setClock() {
+        const d = new Date();
+        clock.textContent = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+      }
+      setClock();
+      setInterval(setClock, 30000);
+      function resize() {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const compact = w < 560;
+        const verticalReserved = compact ? 90 : 136;
+        const availableWidth = Math.max(160, w - (compact ? 16 : 44));
+        const availableHeight = Math.max(300, h - verticalReserved);
+        const scale = Math.max(.18, Math.min(1.15, availableWidth / 454, availableHeight / 956));
+        stage.style.width = `${454 * scale}px`;
+        stage.style.height = `${956 * scale}px`;
+        document.documentElement.style.setProperty('--phone-scale', scale.toFixed(4));
+      }
+      resize();
+      addEventListener('resize', resize);
+      fitButton.addEventListener('click', resize);
+      reloadButton.addEventListener('click', () => {
+        // iframeだけを更新。画面内のデータはFlutterアプリ側の保存仕様に従います。
+        frame.contentWindow?.location.reload();
+      });
+      fullscreenButton.addEventListener('click', async () => {
+        try {
+          if (document.fullscreenElement) {
+            await document.exitFullscreen();
+          } else if (page.requestFullscreen) {
+            await page.requestFullscreen();
+          }
+          resize();
+        } catch (_) { /* 全画面API非対応のブラウザでは通常表示を継続 */ }
+      });
+      document.addEventListener('fullscreenchange', () => {
+        fullscreenButton.textContent = document.fullscreenElement ? '全画面を終了' : '全画面表示';
+        requestAnimationFrame(resize);
+      });
+    })();
+  </script>
+</body>
+</html>
