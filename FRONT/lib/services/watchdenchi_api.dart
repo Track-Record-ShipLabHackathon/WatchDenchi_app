@@ -3,36 +3,38 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-// Go側のAPI契約が確定したら、まずこのファイルだけ変更します。
-// 今は現行の画面から呼び出していないので、端末内保存の動作は変わりません。
+/// テスト時のGo API。URLはflutter build/runの--dart-defineで指定。
 const watchDenchiApiBaseUrl = String.fromEnvironment(
   'WATCHDENCHI_API_BASE_URL',
   defaultValue: 'http://127.0.0.1:8080',
 );
 
-/// サーバーに登録する電池情報。JSONキーはエレナと合意前の「仮仕様」です。
+/// 現在のGo POST /api/batteryに合わせた項目＋新設予定のchemical。
+/// 現行GoはchemicalをまだDBに保存しない。UI側で警告して試験する。
 class BatteryCreateRequest {
   const BatteryCreateRequest({
     required this.type,
     required this.manufacturer,
     required this.quantity,
     required this.storageLocation,
+    required this.chemical,
   });
 
   final String type;
   final String manufacturer;
   final int quantity;
   final String storageLocation;
+  final String chemical;
 
   Map<String, dynamic> toJson() => {
         'type': type,
         'manufacturer': manufacturer,
         'quantity': quantity,
         'storage_location': storageLocation,
+        'chemical': chemical,
       };
 }
 
-/// バッテリーのAPI返却データ。使用/移動を行うにはDB上のIDが必要です。
 class BatteryApiItem {
   const BatteryApiItem({
     required this.id,
@@ -40,15 +42,15 @@ class BatteryApiItem {
     required this.manufacturer,
     required this.quantity,
     required this.storageLocation,
-    this.chemistry,
+    this.chemical,
   });
 
-  final int id;
+  final int id; // BATTERYのPK。後の使用・交換フローで必要。
   final String type;
   final String manufacturer;
   final int quantity;
   final String storageLocation;
-  final String? chemistry;
+  final String? chemical;
 
   factory BatteryApiItem.fromJson(Map<String, dynamic> json) {
     final id = json['id'];
@@ -61,39 +63,33 @@ class BatteryApiItem {
         type is! String ||
         manufacturer is! String ||
         storageLocation is! String) {
-      throw const FormatException('電池一覧のJSON形式が仮仕様と一致しません');
+      throw const FormatException('Goの電池一覧のレスポンス形式が一致しません');
     }
+    // Go側は新仕様でchemicalを返す予定。旧仕様のchemistryとも互換。
+    final chemical = json['chemical'] ?? json['chemistry'];
     return BatteryApiItem(
       id: id,
       type: type,
       manufacturer: manufacturer,
       quantity: quantity,
       storageLocation: storageLocation,
-      chemistry: json['chemistry'] is String
-          ? json['chemistry'] as String
-          : null,
+      chemical: chemical is String ? chemical : null,
     );
   }
 }
 
-/// ネットワーク失敗やHTTPエラーをUI側で区別して扱うための例外。
 class WatchDenchiApiException implements Exception {
   const WatchDenchiApiException(this.message, {this.statusCode});
-
   final String message;
   final int? statusCode;
-
   @override
   String toString() => statusCode == null
       ? 'WatchDenchiApiException: $message'
       : 'WatchDenchiApiException($statusCode): $message';
 }
 
-/// 画面から独立したGo APIの通信担当。実際のサーバーはまだ不要です。
-///
-/// - http.Clientを注入でき、MockClientで通信テストできます。
-/// - POSTは自動再送しません（電池が二重登録されるのを防ぐため）。
-/// - 認証トークンはメモリ上だけ。永続化方法はエレナと決定後に実装。
+/// 匿名トークンを各認証APIのAuthorizationに付与する通信クラス。
+/// Flutterからclient_idを渡さず、Goでトークンからclient_idを特定する。
 class WatchDenchiApi {
   WatchDenchiApi({
     http.Client? client,
@@ -110,22 +106,15 @@ class WatchDenchiApi {
   final Duration _timeout;
   String? _accessToken;
 
-  void setAccessToken(String? token) {
-    _accessToken = token;
-  }
-
-  void close() {
-    if (_ownsClient) _client.close();
-  }
+  void setAccessToken(String? token) => _accessToken = token;
+  String? get accessToken => _accessToken;
+  void close() { if (_ownsClient) _client.close(); }
 
   Uri _uri(String path) => Uri.parse('$_baseUrl$path');
-
-  String? get accessToken => _accessToken;
 
   Map<String, String> _headers({bool authenticated = true}) => {
         'Accept': 'application/json',
         'Content-Type': 'application/json; charset=utf-8',
-        // Bearerヘッダー方式も仮仕様（要合意）。
         if (authenticated && _accessToken != null)
           'Authorization': 'Bearer $_accessToken',
       };
@@ -141,46 +130,35 @@ class WatchDenchiApi {
         'サーバー認証が完了していません。匿名認証を先に実行してください',
       );
     }
-    late http.Response response;
     try {
+      final http.Response response;
       if (method == 'GET') {
-        response = await _client
-            .get(_uri(path), headers: _headers(authenticated: authenticated))
-            .timeout(_timeout);
+        response = await _client.get(_uri(path),
+          headers: _headers(authenticated: authenticated)).timeout(_timeout);
       } else if (method == 'POST') {
-        response = await _client
-            .post(
-              _uri(path),
-              headers: _headers(authenticated: authenticated),
-              // bodyがnullならHTTPの空ボディ。null JSONではありません。
-              body: body == null ? null : jsonEncode(body),
-            )
-            .timeout(_timeout);
+        response = await _client.post(_uri(path),
+          headers: _headers(authenticated: authenticated),
+          body: body == null ? null : jsonEncode(body)).timeout(_timeout);
       } else {
         throw ArgumentError.value(method, 'method', 'GET/POSTのみ対応');
       }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw WatchDenchiApiException('Go APIからエラーが返りました',
+          statusCode: response.statusCode);
+      }
+      return response;
     } on TimeoutException {
-      throw const WatchDenchiApiException('サーバーへの接続がタイムアウトしました');
+      throw const WatchDenchiApiException('Go APIへの接続がタイムアウトしました');
     } on http.ClientException {
-      throw const WatchDenchiApiException('サーバーへ接続できませんでした');
+      throw const WatchDenchiApiException('Go APIに接続できませんでした');
     }
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      // 401/403/409/500等を成功として処理しない。詳細文は合意後に追加。
-      throw WatchDenchiApiException(
-        'サーバーからエラーが返りました',
-        statusCode: response.statusCode,
-      );
-    }
-    return response;
   }
 
-  /// Goの稼働確認。GET /healthz は既にGitHubにコードがあります。
   Future<void> checkHealth() async {
     await _send('GET', '/healthz', authenticated: false);
   }
 
-  /// POST /api/client: {"access_token": "..."} はレスポンスの仮仕様。
+  /// 初回のみ作成。以後はanonymous_session.dartに保存されたトークンを使う。
   Future<String> createAnonymousClient() async {
     final response = await _send('POST', '/api/client', authenticated: false);
     try {
@@ -193,40 +171,37 @@ class WatchDenchiApi {
       setAccessToken(token);
       return token;
     } on FormatException {
-      throw const WatchDenchiApiException('認証レスポンスの形式が仮仕様と一致しません');
+      throw const WatchDenchiApiException('Goの匿名認証レスポンスが不正です');
     }
   }
 
-  /// GET /api/battery。仮仕様としてJSON配列または {"batteries": [...]} を受け付ける。
   Future<List<BatteryApiItem>> getBatteries() async {
     final response = await _send('GET', '/api/battery');
     try {
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-      final dynamic items = decoded is List
-          ? decoded
-          : decoded is Map<String, dynamic>
-              ? decoded['batteries']
-              : null;
-      if (items is! List) throw const FormatException('一覧が配列ではありません');
+      final dynamic items = decoded is List ? decoded :
+        decoded is Map<String,dynamic> ? decoded['batteries'] : null;
+      if (items is! List) throw const FormatException('電池一覧が配列ではありません');
       return items.map((item) {
-        if (item is! Map) throw const FormatException('不正な電池データです');
+        if (item is! Map) throw const FormatException('電池のレコード形式が不正です');
         return BatteryApiItem.fromJson(Map<String, dynamic>.from(item));
       }).toList(growable: false);
     } on FormatException {
-      throw const WatchDenchiApiException('電池一覧のJSON形式が仮仕様と一致しません');
+      throw const WatchDenchiApiException('Goの電池一覧の形式が不正です');
     } on TypeError {
-      throw const WatchDenchiApiException('電池一覧のデータ型が正しくありません');
+      throw const WatchDenchiApiException('Goの電池一覧に型の不一致があります');
     }
   }
 
-  /// POST /api/battery。設計書の応答はNULLなので、2xxなら成功とする。
-  Future<void> registerBattery(BatteryCreateRequest draft) async {
-    if (draft.type.trim().isEmpty ||
-        draft.manufacturer.trim().isEmpty ||
-        draft.quantity <= 0 ||
-        draft.storageLocation.trim().isEmpty) {
+  /// 二重登録防止のため、失敗しても自動リトライしない。
+  Future<void> registerBattery(BatteryCreateRequest request) async {
+    if (request.type.trim().isEmpty ||
+        request.manufacturer.trim().isEmpty ||
+        request.quantity < 1 ||
+        request.storageLocation.trim().isEmpty ||
+        request.chemical.trim().isEmpty) {
       throw const FormatException('登録する電池情報が不正です');
     }
-    await _send('POST', '/api/battery', body: draft.toJson());
+    await _send('POST', '/api/battery', body: request.toJson());
   }
 }
