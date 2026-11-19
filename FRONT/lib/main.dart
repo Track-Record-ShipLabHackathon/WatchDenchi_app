@@ -195,7 +195,10 @@ class _SplashPageState extends State<SplashPage>
 // Go APIで試験する場合だけON。通常は既存のローカルUIと保存を維持する。
 // 現行Go APIには「保管場所変更/使用開始/交換」がまだないため、
 // 試験モードではこれらの操作を明示的に止め、DBとローカルの二重管理を避ける。
-const bool enableServerInventory = false; // 安定版は端末内保存のみ
+const bool enableServerInventory = bool.fromEnvironment(
+  'WATCHDENCHI_ENABLE_SERVER_INVENTORY',
+  defaultValue: false,
+); // 通常公開版は端末内保存、api-previewビルドのみサーバー在庫
 
 // 電池と機器のデータ
 class BatteryEntry {
