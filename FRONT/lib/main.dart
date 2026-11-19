@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'services/anonymous_session.dart';
+import 'services/watchdenchi_api.dart';
 
 // アプリの色と選択肢
 const Color cream = Color(0xFFF5EFE5);
@@ -191,6 +192,14 @@ class _SplashPageState extends State<SplashPage>
 }
 
 
+// Go APIで試験する場合だけON。通常は既存のローカルUIと保存を維持する。
+// 現行Go APIには「保管場所変更/使用開始/交換」がまだないため、
+// 試験モードではこれらの操作を明示的に止め、DBとローカルの二重管理を避ける。
+const bool enableServerInventory = bool.fromEnvironment(
+  'WATCHDENCHI_ENABLE_SERVER_INVENTORY',
+  defaultValue: false,
+);
+
 // 電池と機器のデータ
 class BatteryEntry {
   const BatteryEntry({
@@ -199,8 +208,11 @@ class BatteryEntry {
     required this.quantity,
     required this.location,
     required this.chemistry,
+    this.id,
   });
 
+  // GoのBATTERY主キー。古いローカルデータにはないので任意。
+  final int? id;
   final String type;
   final String manufacturer;
   final int quantity;
@@ -208,6 +220,7 @@ class BatteryEntry {
   final String chemistry;
 
   Map<String, dynamic> toJson() => {
+        if (id != null) 'id': id,
         'type': type,
         'manufacturer': manufacturer,
         'quantity': quantity,
@@ -216,6 +229,7 @@ class BatteryEntry {
       };
 
   factory BatteryEntry.fromJson(Map<String, dynamic> json) => BatteryEntry(
+        id: (json['id'] as num?)?.toInt(),
         type: json['type'] as String? ?? 'その他',
         manufacturer: json['manufacturer'] as String? ?? '不明',
         quantity: (json['quantity'] as num?)?.toInt() ?? 0,
@@ -247,21 +261,9 @@ class DeviceUsage {
   // 使用終了後も記録を残す。旧データは使用中として読み込む。
   final String status;
   final DateTime? endedAt;
-  // ユーザーが指定した交換目安日。実測残量やAI予測値ではない。
-  // 予測APIができたら別フィールドで保持する。
+  // 旧ローカルデータの読み込み互換性のためだけに保持する。
+  // 手入力の日付は表示しない。将来のPython予測日とは別項目。
   final DateTime? manualReplacementAt;
-
-  DeviceUsage withManualReplacementAt(DateTime? target) => DeviceUsage(
-        deviceName: deviceName,
-        type: type,
-        manufacturer: manufacturer,
-        quantity: quantity,
-        startedAt: startedAt,
-        iconKey: iconKey,
-        status: status,
-        endedAt: endedAt,
-        manualReplacementAt: target,
-      );
 
   bool get isActive => status == 'active';
 
@@ -322,6 +324,19 @@ class LocalBatteryStore {
       _prefs.setBool(regionSetupSeenKey, true);
 
   static Future<List<BatteryEntry>> readInventory() async {
+    if (enableServerInventory) {
+      // ユーザーのclient_idは送らず、GoにBearerトークンを渡して識別する。
+      await WatchDenchiServerServices.auth.restoreOrCreate();
+      final remote = await WatchDenchiServerServices.api.getBatteries();
+      return remote.where((e) => e.quantity > 0).map((e) => BatteryEntry(
+        id: e.id,
+        type: e.type,
+        manufacturer: e.manufacturer,
+        quantity: e.quantity,
+        location: e.storageLocation,
+        chemistry: e.chemical ?? '不明',
+      )).toList(growable: false);
+    }
     final saved = await _prefs.getString(inventoryKey) ??
         await _prefs.getString(olderInventoryKey);
     if (saved == null) return [];
@@ -334,6 +349,9 @@ class LocalBatteryStore {
   }
 
   static Future<void> saveInventory(List<BatteryEntry> entries) async {
+    if (enableServerInventory) {
+      throw StateError('サーバー在庫はGo APIでのみ変更できます。ローカル保存を停止しました');
+    }
     await _prefs.setString(
       inventoryKey,
       jsonEncode(entries.map((entry) => entry.toJson()).toList()),
@@ -385,175 +403,6 @@ class LocalBatteryStore {
       ),
     }));
   }
-}
-
-// 手入力の「交換目安日」と実際の電池残量は別の情報。
-// 将来の予測結果と混同しないように、日付は独立した値として保存する。
-String formatReplacementDate(DateTime value) =>
-    '${value.year}年${value.month}月${value.day}日';
-
-int daysUntilReplacement(DateTime target, DateTime now) {
-  final day = DateTime(now.year, now.month, now.day);
-  final due = DateTime(target.year, target.month, target.day);
-  return due.difference(day).inDays;
-}
-
-// 日付の入力は任意。キャンセル時はnullを返して以前の設定を維持する。
-Future<DateTime?> pickManualReplacementDate(
-  BuildContext context, {
-  DateTime? current,
-}) {
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
-  final maxDate = DateTime(today.year + 5, today.month, today.day);
-  DateTime chosen = current != null && !current.isBefore(today) &&
-          !current.isAfter(maxDate)
-      ? current
-      : today.add(const Duration(days: 90));
-  if (chosen.isAfter(maxDate)) chosen = maxDate;
-  return showCupertinoModalPopup<DateTime>(
-    context: context,
-    builder: (popupContext) => Container(
-      height: 335,
-      color: paper,
-      child: SafeArea(
-        top: false,
-        child: Column(
-          children: [
-            SizedBox(
-              height: 55,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  CupertinoButton(
-                    onPressed: () => Navigator.of(popupContext).pop(),
-                    child: const Text('キャンセル',
-                        style: TextStyle(color: mutedInk)),
-                  ),
-                  const Text('交換目安日を選ぶ',
-                      style: TextStyle(color: ink,
-                          fontWeight: FontWeight.w700)),
-                  CupertinoButton(
-                    onPressed: () => Navigator.of(popupContext).pop(chosen),
-                    child: const Text('決定',
-                        style: TextStyle(color: coral,
-                            fontWeight: FontWeight.w700)),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: CupertinoDatePicker(
-                mode: CupertinoDatePickerMode.date,
-                initialDateTime: chosen,
-                minimumDate: today,
-                maximumDate: maxDate,
-                onDateTimeChanged: (value) => chosen = value,
-              ),
-            ),
-            const SizedBox(height: 6),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-// 交換「予定日」との距離を小さなバッジにする。残量%ではない。
-class _ManualReplacementBadge extends StatelessWidget {
-  const _ManualReplacementBadge({required this.target});
-  final DateTime? target;
-
-  @override
-  Widget build(BuildContext context) {
-    final days = target == null
-        ? null
-        : daysUntilReplacement(target!, DateTime.now());
-    final Color fill;
-    final String label;
-    final int batteryLevel;
-    if (days == null) {
-      fill = const Color(0xFF9B958F);
-      label = '未設定';
-      batteryLevel = 0;
-    } else if (days <= 0) {
-      fill = const Color(0xFFD86B64);
-      label = '交換';
-      batteryLevel = 0;
-    } else if (days <= 14) {
-      fill = const Color(0xFFE6AD36);
-      label = '注意';
-      batteryLevel = 1;
-    } else {
-      fill = const Color(0xFF68A678);
-      label = '安心';
-      batteryLevel = 3;
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: fill,
-        borderRadius: BorderRadius.circular(50),
-        border: Border.all(color: paper, width: 1.5),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (days != null) ...[
-            _TinyBattery(level: batteryLevel),
-            const SizedBox(width: 4),
-          ],
-          Text(label,
-              style: const TextStyle(
-                color: CupertinoColors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-              )),
-        ],
-      ),
-    );
-  }
-}
-
-class _TinyBattery extends StatelessWidget {
-  const _TinyBattery({required this.level});
-  final int level;
-
-  @override
-  Widget build(BuildContext context) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 15,
-            height: 9,
-            padding: const EdgeInsets.all(1.6),
-            decoration: BoxDecoration(
-              border: Border.all(color: CupertinoColors.white, width: 1.2),
-              borderRadius: BorderRadius.circular(2),
-            ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: FractionallySizedBox(
-                widthFactor: level == 0 ? 0.13 : level / 3,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: CupertinoColors.white,
-                    borderRadius: BorderRadius.circular(1),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Container(
-            width: 2,
-            height: 4,
-            decoration: const BoxDecoration(
-              color: CupertinoColors.white,
-              borderRadius: BorderRadius.horizontal(right: Radius.circular(1)),
-            ),
-          ),
-        ],
-      );
 }
 
 // 電池のメーカー別カラー
@@ -1124,35 +973,18 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // 使用中のアイコンをタップしたときだけ操作を表示
+  // 使用中の機器をタップしたときは「電池を交換する」だけを表示する。
+  // 手入力の交換目安日と使用終了操作はUIから廃止。
   Future<void> openDeviceActions(DeviceUsage usage) async {
     final action = await showCupertinoModalPopup<String>(
       context: context,
       builder: (popupContext) => CupertinoActionSheet(
         title: Text(usage.deviceName),
-        message: Text(
-          '${usage.type}・${usage.quantity}本・${usage.manufacturer}'
-          '\n交換目安：${usage.manualReplacementAt == null ? '未設定' : formatReplacementDate(usage.manualReplacementAt!)}'
-          '\n※ 手入力の予定日です（実際の残量ではありません）',
-        ),
+        message: Text('${usage.type}・${usage.quantity}本・${usage.manufacturer}'),
         actions: [
-          CupertinoActionSheetAction(
-            onPressed: () => Navigator.of(popupContext).pop('date'),
-            child: Text(usage.manualReplacementAt == null
-                ? '交換目安日を設定する' : '交換目安日を変更する'),
-          ),
-          if (usage.manualReplacementAt != null)
-            CupertinoActionSheetAction(
-              onPressed: () => Navigator.of(popupContext).pop('clear-date'),
-              child: const Text('交換目安日を解除する'),
-            ),
           CupertinoActionSheetAction(
             onPressed: () => Navigator.of(popupContext).pop('replace'),
             child: const Text('電池を交換する'),
-          ),
-          CupertinoActionSheetAction(
-            onPressed: () => Navigator.of(popupContext).pop('finish'),
-            child: const Text('使用を終了する'),
           ),
         ],
         cancelButton: CupertinoActionSheetAction(
@@ -1162,46 +994,15 @@ class _HomePageState extends State<HomePage> {
       ),
     );
     if (!mounted) return;
-    if (action == 'finish') {
-      await finishUsage(usage);
-    } else if (action == 'replace') {
-      await chooseReplacement(usage);
-    } else if (action == 'date') {
-      await updateManualReplacementDate(usage);
-    } else if (action == 'clear-date') {
-      await updateManualReplacementDate(usage, clear: true);
-    }
-  }
-
-  Future<void> updateManualReplacementDate(
-    DeviceUsage usage, {bool clear = false}
-  ) async {
-    final DateTime? selected;
-    if (clear) {
-      selected = null;
-    } else {
-      selected = await pickManualReplacementDate(
-        context, current: usage.manualReplacementAt,
-      );
-      if (selected == null) return; // キャンセルは既存値を維持
-    }
-    if (!mounted) return;
-    final index = devices.indexOf(usage);
-    if (index < 0 || !devices[index].isActive) return;
-    final updated = [...devices];
-    updated[index] = usage.withManualReplacementAt(selected);
-    try {
-      await LocalBatteryStore.saveDevices(updated);
-      if (!mounted) return;
-      setState(() => devices = updated);
-    } catch (error) {
-      if (!mounted) return;
-      await showError(context, '交換目安日を保存できませんでした\n$error');
-    }
+    if (action == 'replace') await chooseReplacement(usage);
   }
 
   // 新しい電池を在庫棚から選び、同じ機器の使用履歴を継続する
   Future<void> chooseReplacement(DeviceUsage usage) async {
+    if (enableServerInventory) {
+      await showError(context, '交換APIはGo側で未実装です。サーバー試験モードでの交換は停止しています');
+      return;
+    }
     final choices = inventory
         .where((entry) => entry.type == usage.type)
         .toList();
@@ -1264,8 +1065,7 @@ class _HomePageState extends State<HomePage> {
         content: Text(
           '${usage.deviceName}の使用中の電池を終了し、'
           '${selected.manufacturer}の${selected.type}を${usage.quantity}本使い始めます。'
-          '\n古い電池の履歴は残し、在庫には戻しません。'
-          '\n新しい電池の交換目安日は未設定になります。',
+          '\n古い電池の履歴は残し、在庫には戻しません。',
         ),
         actions: [
           CupertinoDialogAction(
@@ -1304,6 +1104,7 @@ class _HomePageState extends State<HomePage> {
       nextStock.removeAt(stockIndex);
     } else {
       nextStock[stockIndex] = BatteryEntry(
+        id: selected.id,
         type: selected.type,
         manufacturer: selected.manufacturer,
         quantity: remainder,
@@ -1332,40 +1133,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> finishUsage(DeviceUsage usage) async {
-    final confirmed = await showCupertinoDialog<bool>(
-      context: context,
-      builder: (dialogContext) => CupertinoAlertDialog(
-        title: const Text('使用を終了しますか？'),
-        content: Text('${usage.deviceName}で使っている${usage.quantity}本を使用中一覧から外します\n使用履歴は残し、在庫には戻しません'),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('キャンセル'),
-          ),
-          CupertinoDialogAction(
-            isDestructiveAction: true,
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('使用終了'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    final index = devices.indexOf(usage);
-    if (index < 0 || !devices[index].isActive) return;
-    final updated = [...devices];
-    updated[index] = usage.finish(DateTime.now());
-    try {
-      await LocalBatteryStore.saveDevices(updated);
-      if (!mounted) return;
-      setState(() => devices = updated);
-    } catch (error) {
-      if (!mounted) return;
-      await showError(context, '使用情報を保存できませんでした\n$error');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final activeDevices = devices.where((item) => item.isActive).toList();
@@ -1374,32 +1141,39 @@ class _HomePageState extends State<HomePage> {
       child: SafeArea(
         child: loading
             ? const Center(child: CupertinoActivityIndicator())
-            : CustomScrollView(
+            // 空のときはスクロールリスト内ではなく、タブバーを除く画面中央に表示。
+            : activeDevices.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(CupertinoIcons.house_alt,
+                              color: Color(0xFFC09A7D), size: 52),
+                          SizedBox(height: 17),
+                          Text('使用している機器はありません',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: ink, fontSize: 17,
+                                  fontWeight: FontWeight.w600)),
+                          SizedBox(height: 9),
+                          Text('在庫棚から電池を選んで登録',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: mutedInk, fontSize: 14)),
+                        ],
+                      ),
+                    ),
+                  )
+                : CustomScrollView(
                 slivers: [
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(24, 30, 24, 0),
                     sliver: SliverList(
                       delegate: SliverChildListDelegate([
                         const SizedBox(height: 19),
-                        if (activeDevices.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 27),
-                            child: Column(
-                              children: [
-                                Icon(CupertinoIcons.house_alt,
-                                    color: const Color(0xFFC09A7D), size: 32),
-                                const SizedBox(height: 10),
-                                const Text('使用している機器はありません',
-                                    style: TextStyle(color: ink, fontSize: 14)),
-                                const SizedBox(height: 5),
-                                const Text('在庫棚から電池を選んで登録',
-                                    style: TextStyle(
-                                        color: mutedInk, fontSize: 12)),
-                              ],
-                            ),
-                          )
-                        else
-                          LayoutBuilder(
+                        LayoutBuilder(
                             builder: (context, constraints) {
                               final columns = constraints.maxWidth < 300 ? 2 : 3;
                               const spacing = 12.0;
@@ -1437,45 +1211,22 @@ class _HomePageState extends State<HomePage> {
                                           child: Column(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                               // アイコンの絵柄はそのまま。右上に交換目安のバッジ。
-                                               SizedBox(
-                                                 width: 82,
-                                                 height: 85,
-                                                 child: Stack(
-                                                   clipBehavior: Clip.none,
-                                                   children: [
-                                                     Positioned(
-                                                       left: 1,
-                                                       bottom: 0,
-                                                       child: Container(
-                                                         width: 80,
-                                                         height: 80,
-                                                         alignment: Alignment.center,
-                                                         decoration: BoxDecoration(
-                                                           color: paleCoral,
-                                                           borderRadius:
-                                                               BorderRadius.circular(25),
-                                                           border: Border.all(
-                                                             color: const Color(0xFFF0CCC5),
-                                                           ),
-                                                         ),
-                                                         child: Icon(
-                                                           resolvedDeviceIcon(usage.iconKey).icon,
-                                                           color: coral,
-                                                           size: 39,
-                                                         ),
-                                                       ),
-                                                     ),
-                                                     Positioned(
-                                                       top: -7,
-                                                       right: -8,
-                                                       child: _ManualReplacementBadge(
-                                                         target: usage.manualReplacementAt,
-                                                       ),
-                                                     ),
-                                                   ],
-                                                 ),
-                                               ),
+                                              // 予測APIの結果が来るまではステータスバッジを表示しない。
+                                              Container(
+                                                width: 80,
+                                                height: 80,
+                                                alignment: Alignment.center,
+                                                decoration: BoxDecoration(
+                                                  color: paleCoral,
+                                                  borderRadius: BorderRadius.circular(25),
+                                                  border: Border.all(color: const Color(0xFFF0CCC5)),
+                                                ),
+                                                child: Icon(
+                                                  resolvedDeviceIcon(usage.iconKey).icon,
+                                                  color: coral,
+                                                  size: 39,
+                                                ),
+                                              ),
                                               const SizedBox(height: 9),
                                               Text(
                                                 usage.deviceName,
@@ -1498,13 +1249,6 @@ class _HomePageState extends State<HomePage> {
                               );
                             },
                           ),
-                        if (activeDevices.isNotEmpty) ...[
-                          const SizedBox(height: 10),
-                          const Text(
-                            '※ 色は設定した交換目安日による表示です。電池の残量ではありません。',
-                            style: TextStyle(color: mutedInk, fontSize: 11),
-                          ),
-                        ],
                         const SizedBox(height: 25),
                       ]),
                     ),
@@ -1784,10 +1528,21 @@ class _RegionSetupPageState extends State<RegionSetupPage> {
         middle: Text('はじめに', style: TextStyle(color: ink)),
       ),
       child: SafeArea(
-        child: ListView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          padding: const EdgeInsets.fromLTRB(24, 25, 24, 40),
-          children: [
+        // フォームが収まるときは縦中央、候補表示やキーボードで長くなればスクロール。
+        child: LayoutBuilder(
+          builder: (context, viewport) => SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: viewport.maxHeight),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 460),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
             Container(
               width: 70,
               height: 70,
@@ -1952,7 +1707,13 @@ class _RegionSetupPageState extends State<RegionSetupPage> {
             const Text('回収日・処分方法は公式情報が確認できた地域だけ表示するよ。',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: mutedInk, fontSize: 11)),
-          ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -1988,7 +1749,6 @@ class _DisposalPageState extends State<DisposalPage> {
   static const List<Map<String, String>> categories = [
     {'key': 'dry', 'name': '乾電池'},
     {'key': 'coin', 'name': 'コイン形'},
-    {'key': 'button', 'name': 'ボタン電池'},
     {'key': 'recharge', 'name': '充電式'},
   ];
 
@@ -2278,8 +2038,6 @@ class _DisposalPageState extends State<DisposalPage> {
         return '単1〜単5形';
       case 'coin':
         return 'CR2032など';
-      case 'button':
-        return 'LR44など';
       case 'recharge':
         return 'ニッケル水素など';
       default:
@@ -2293,8 +2051,6 @@ class _DisposalPageState extends State<DisposalPage> {
         return ['＋と−をテープで絶縁', '自治体のルールで出す'];
       case 'coin':
         return ['表裏の電極をテープで絶縁', '自治体の指定方法で出す'];
-      case 'button':
-        return ['電極をテープで絶縁', '回収協力店などへ持ち込む'];
       case 'recharge':
         return ['端子をテープで絶縁', '回収対象を確認して持ち込む'];
       default:
@@ -2905,6 +2661,59 @@ class _InventoryPageState extends State<InventoryPage> {
     );
     if (!mounted || newEntry == null) return;
 
+    if (enableServerInventory) {
+      if (newEntry.location.trim().isEmpty) {
+        await showError(context, 'Go APIへ登録する場合、保管場所の入力が必要です');
+        return;
+      }
+      // 2026-11-19確認のGo mainにはchemical列/入力処理がない。
+      // APIは未知のJSONキーを無視するため、黙って保存済みに見せない。
+      final proceed = await showCupertinoDialog<bool>(
+        context: context,
+        builder: (dialogContext) => CupertinoAlertDialog(
+          title: const Text('Go API 接続テスト'),
+          content: const Text(
+            '今のGo側には電池の中身（chemical）の保存処理がまだありません。'
+            'このテスト登録では本数やメーカーはDBに保存されますが、'
+            '電池の中身は保存されません。テスト登録しますか？',
+          ),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('やめる'),
+            ),
+            CupertinoDialogAction(
+              isDefaultAction: true,
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('テスト登録'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || proceed != true) return;
+      try {
+        await WatchDenchiServerServices.auth.restoreOrCreate();
+        await WatchDenchiServerServices.api.registerBattery(
+          BatteryCreateRequest(
+            type: newEntry.type,
+            manufacturer: newEntry.manufacturer,
+            quantity: newEntry.quantity,
+            storageLocation: newEntry.location,
+            chemical: newEntry.chemistry,
+          ),
+        );
+        // POSTが成功した後だけ再取得。タイムアウト時の自動再送はしない。
+        final refreshed = await LocalBatteryStore.readInventory();
+        if (!mounted) return;
+        setState(() => entries = refreshed);
+      } catch (error) {
+        if (!mounted) return;
+        await showError(context,
+          'サーバー登録・一覧の更新を確認できませんでした。二重登録防止のため、再登録前にサーバー在庫を確認してください。\n$error');
+      }
+      return;
+    }
+
     final updated = [...entries];
     final i = updated.indexWhere((entry) =>
         entry.type == newEntry.type &&
@@ -2917,6 +2726,7 @@ class _InventoryPageState extends State<InventoryPage> {
     } else {
       final old = updated[i];
       updated[i] = BatteryEntry(
+        id: old.id,
         type: old.type,
         manufacturer: old.manufacturer,
         quantity: old.quantity + newEntry.quantity,
@@ -2935,6 +2745,10 @@ class _InventoryPageState extends State<InventoryPage> {
   }
 
   Future<void> moveBattery(BatteryEntry entry) async {
+    if (enableServerInventory) {
+      await showError(context, '保管場所変更APIはGo側で未実装です。サーバー試験モードでは変更できません');
+      return;
+    }
     final request = await Navigator.of(context).push<MoveBatteryRequest>(
       CupertinoPageRoute<MoveBatteryRequest>(
         builder: (_) => MoveBatteryPage(entry: entry),
@@ -2955,6 +2769,7 @@ class _InventoryPageState extends State<InventoryPage> {
       updated.removeAt(index);
     } else {
       updated[index] = BatteryEntry(
+        id: entry.id,
         type: entry.type,
         manufacturer: entry.manufacturer,
         quantity: remaining,
@@ -2971,6 +2786,7 @@ class _InventoryPageState extends State<InventoryPage> {
     if (matchingIndex >= 0) {
       final old = updated[matchingIndex];
       updated[matchingIndex] = BatteryEntry(
+        id: old.id,
         type: old.type,
         manufacturer: old.manufacturer,
         quantity: old.quantity + request.quantity,
@@ -2979,6 +2795,7 @@ class _InventoryPageState extends State<InventoryPage> {
       );
     } else {
       updated.add(BatteryEntry(
+        id: entry.id,
         type: entry.type,
         manufacturer: entry.manufacturer,
         quantity: request.quantity,
@@ -2998,6 +2815,10 @@ class _InventoryPageState extends State<InventoryPage> {
   }
 
   Future<void> useBattery(BatteryEntry entry) async {
+    if (enableServerInventory) {
+      await showError(context, '機器登録・使用開始APIはGo側で未実装です。サーバー試験モードでは使用できません');
+      return;
+    }
     final request = await showCupertinoModalPopup<UseBatteryRequest>(
       context: context,
       builder: (_) => UseBatterySheet(entry: entry),
@@ -3012,6 +2833,7 @@ class _InventoryPageState extends State<InventoryPage> {
       updatedStock.removeAt(index);
     } else {
       updatedStock[index] = BatteryEntry(
+        id: entry.id,
         type: entry.type,
         manufacturer: entry.manufacturer,
         quantity: remaining,
@@ -3028,7 +2850,6 @@ class _InventoryPageState extends State<InventoryPage> {
         quantity: request.quantity,
         startedAt: DateTime.now(),
         iconKey: request.iconKey,
-        manualReplacementAt: request.manualReplacementAt,
       ),
     ];
 
@@ -3817,12 +3638,10 @@ class UseBatteryRequest {
     required this.deviceName,
     required this.quantity,
     required this.iconKey,
-    this.manualReplacementAt,
   });
   final String deviceName;
   final int quantity;
   final String iconKey;
-  final DateTime? manualReplacementAt;
 }
 
 // 電池を使う機器の登録画面
@@ -3836,123 +3655,12 @@ class UseBatterySheet extends StatefulWidget {
 
 class _UseBatterySheetState extends State<UseBatterySheet> {
   final TextEditingController deviceController = TextEditingController();
-  final FocusNode deviceFocus = FocusNode();
-  List<DeviceUsage> previousDevices = [];
   int count = 1;
   String? iconKey; // 未選択
   String? error;
-  String? historyHint;
-  DateTime? manualReplacementAt;
-
-  Future<void> chooseManualReplacementDate() async {
-    final chosen = await pickManualReplacementDate(
-      context, current: manualReplacementAt,
-    );
-    if (!mounted || chosen == null) return;
-    setState(() => manualReplacementAt = chosen);
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    deviceFocus.addListener(_onFocusChanged);
-    _loadPreviousDevices();
-  }
-
-  void _onFocusChanged() {
-    if (mounted) setState(() {});
-  }
-
-  // 使用終了後の履歴も含め、以前登録した機器を新しい順に並べる
-  Future<void> _loadPreviousDevices() async {
-    try {
-      final usages = await LocalBatteryStore.readDevices();
-      usages.sort((a, b) => b.startedAt.compareTo(a.startedAt));
-      if (!mounted) return;
-      setState(() => previousDevices = usages);
-    } catch (error) {
-      debugPrint('最近使った機器を読み込めませんでした: $error');
-      // 履歴が取得できなくても、従来の手入力で登録できる
-    }
-  }
-
-  // 同名の機器は直近の使用情報だけを候補にする
-  List<DeviceUsage> get recentSuggestions {
-    final query = deviceController.text.trim().toLowerCase();
-    final seen = <String>{};
-    final results = <DeviceUsage>[];
-    for (final usage in previousDevices) {
-      final key = usage.deviceName.trim().toLowerCase();
-      if (key.isEmpty || !seen.add(key)) continue;
-      if (query.isNotEmpty && !key.contains(query)) continue;
-      results.add(usage);
-      if (results.length >= (query.isEmpty ? 5 : 8)) break;
-    }
-    return results;
-  }
-
-  // 候補を選ぶと、機器名・アイコン・前回使用本数を一括で入力
-  void _selectPreviousDevice(DeviceUsage usage) {
-    final stock = widget.entry.quantity;
-    final chosenCount = usage.quantity > stock
-        ? stock
-        : (usage.quantity < 1 ? 1 : usage.quantity);
-    deviceController.value = TextEditingValue(
-      text: usage.deviceName,
-      selection: TextSelection.collapsed(offset: usage.deviceName.length),
-    );
-    setState(() {
-      iconKey = resolvedDeviceIcon(usage.iconKey).key;
-      count = chosenCount;
-      error = null;
-      if (usage.type != widget.entry.type) {
-        historyHint = '前回は${usage.type}を使用。今回は${widget.entry.type}を選択中だよ。電池の種類を確認してね。';
-      } else if (usage.quantity > stock) {
-        historyHint = '前回は${usage.quantity}本。今回は在庫に合わせて${stock}本にしたよ。';
-      } else {
-        historyHint = null;
-      }
-    });
-    deviceFocus.unfocus();
-  }
-
-  Widget _buildRecentChip(DeviceUsage usage) {
-    final selected = deviceController.text.trim() == usage.deviceName;
-    return CupertinoButton(
-      padding: EdgeInsets.zero,
-      onPressed: () => _selectPreviousDevice(usage),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 230),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        decoration: BoxDecoration(
-          color: selected ? paleCoral : paper,
-          border: Border.all(
-            color: selected ? coral : const Color(0xFFE6D9C8),
-          ),
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(resolvedDeviceIcon(usage.iconKey).icon,
-                color: selected ? coral : mutedInk, size: 17),
-            const SizedBox(width: 6),
-            Text(usage.deviceName,
-                style: const TextStyle(color: ink, fontSize: 12)),
-            const SizedBox(width: 7),
-            Text('${usage.quantity}本',
-                style: const TextStyle(color: mutedInk, fontSize: 11)),
-          ],
-        ),
-      ),
-    );
-  }
 
   @override
   void dispose() {
-    deviceFocus.removeListener(_onFocusChanged);
-    deviceFocus.dispose();
     deviceController.dispose();
     super.dispose();
   }
@@ -3972,7 +3680,6 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
         deviceName: name,
         quantity: count,
         iconKey: iconKey!,
-        manualReplacementAt: manualReplacementAt,
       ),
     );
   }
@@ -4052,60 +3759,13 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
               const SizedBox(height: 7),
               CupertinoTextField(
                 controller: deviceController,
-                focusNode: deviceFocus,
                 placeholder: '例：テレビのリモコン、壁掛け時計',
                 padding: const EdgeInsets.all(15),
                 decoration: inputDecoration(),
-                onChanged: (_) => setState(() {
-                  historyHint = null;
-                  error = null;
-                }),
+                onChanged: (_) {
+                  if (error != null) setState(() => error = null);
+                },
               ),
-              if (previousDevices.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Text(
-                      deviceController.text.trim().isEmpty
-                          ? '最近使った機器'
-                          : '名前に合う機器',
-                      style: const TextStyle(
-                        color: mutedInk,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const Spacer(),
-                    const Text('タップで自動入力',
-                        style: TextStyle(color: mutedInk, fontSize: 11)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                if (recentSuggestions.isNotEmpty)
-                  SizedBox(
-                    height: 43,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      padding: EdgeInsets.zero,
-                      itemCount: recentSuggestions.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(width: 8),
-                      itemBuilder: (context, index) =>
-                          _buildRecentChip(recentSuggestions[index]),
-                    ),
-                  )
-                else
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 7),
-                    child: Text('一致する機器はありません',
-                        style: TextStyle(color: mutedInk, fontSize: 12)),
-                  ),
-              ],
-              if (historyHint != null) ...[
-                const SizedBox(height: 7),
-                Text(historyHint!,
-                    style: const TextStyle(color: coral, fontSize: 12)),
-              ],
               const SizedBox(height: 18),
               const Text('機器のアイコン', style: TextStyle(
                   color: ink, fontWeight: FontWeight.w600)),
@@ -4118,11 +3778,12 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
                   scrollDirection: Axis.horizontal,
                   children: [
                     for (final option in deviceIconOptions)
-                      buildIconChoice(
-                        label: option.label,
-                        icon: option.icon,
-                        choiceKey: option.key,
-                      ),
+                      if (option.key != 'other')
+                        buildIconChoice(
+                          label: option.label,
+                          icon: option.icon,
+                          choiceKey: option.key,
+                        ),
                   ],
                 ),
               ),
@@ -4175,43 +3836,6 @@ class _UseBatterySheetState extends State<UseBatterySheet> {
                   ),
                 ],
               ),
-              const SizedBox(height: 22),
-              const Text('交換の目安日（任意）', style: TextStyle(
-                  color: ink, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 8),
-              CupertinoButton(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-                color: paper,
-                borderRadius: BorderRadius.circular(14),
-                onPressed: chooseManualReplacementDate,
-                child: Row(
-                  children: [
-                    const Icon(CupertinoIcons.calendar, color: coral, size: 19),
-                    const SizedBox(width: 9),
-                    Expanded(child: Text(
-                      manualReplacementAt == null
-                          ? '設定せずに使う（後から設定できます）'
-                          : formatReplacementDate(manualReplacementAt!),
-                      style: const TextStyle(color: ink, fontSize: 13),
-                    )),
-                    const Icon(CupertinoIcons.chevron_right,
-                        color: mutedInk, size: 14),
-                  ],
-                ),
-              ),
-              if (manualReplacementAt != null)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: CupertinoButton(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                    onPressed: () => setState(() => manualReplacementAt = null),
-                    child: const Text('設定を解除',
-                        style: TextStyle(color: mutedInk, fontSize: 12)),
-                  ),
-                ),
-              const Text('設定した日付から緑・黄・赤の表示を切り替えます。'
-                  '電池の残量を測定する機能ではありません。',
-                  style: TextStyle(color: mutedInk, fontSize: 11, height: 1.5)),
               if (error != null) ...[
                 const SizedBox(height: 8),
                 Text(error!, style: const TextStyle(color: coral, fontSize: 12)),

@@ -33,6 +33,12 @@ jobs:
       - name: Install dependencies
         run: flutter pub get --enforce-lockfile
 
+      - name: Analyze Flutter
+        run: flutter analyze --no-pub --no-fatal-infos
+
+      - name: Test Flutter
+        run: flutter test --no-pub
+
       - name: Build Flutter Web
         run: >-
           flutter build web
@@ -40,6 +46,23 @@ jobs:
           --base-href /WatchDenchi_app/
           --dart-define=WATCHDENCHI_API_BASE_URL=https://watchdenchi-app.onrender.com
           --dart-define=WATCHDENCHI_ENABLE_SERVER_AUTH=true
+
+      # Separate build: keep server inventory disabled on the normal page.
+      # Both paths share the Origin allowed by the Go server.
+      - name: Build API preview
+        run: >-
+          flutter build web
+          --no-pub
+          --output build/api-preview
+          --base-href /WatchDenchi_app/api-preview/
+          --dart-define=WATCHDENCHI_API_BASE_URL=https://watchdenchi-app.onrender.com
+          --dart-define=WATCHDENCHI_ENABLE_SERVER_AUTH=true
+          --dart-define=WATCHDENCHI_ENABLE_SERVER_INVENTORY=true
+
+      - name: Include API preview in Pages artifact
+        run: |
+          mkdir -p build/web/api-preview
+          cp -R build/api-preview/. build/web/api-preview/
 
       - name: Upload site
         if: github.event_name == 'push'
