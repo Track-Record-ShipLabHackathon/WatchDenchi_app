@@ -43,6 +43,13 @@ jobs:
         with:
           go-version-file: BACK/go.mod
           cache: false
+      - name: Check Go formatting
+        run: |
+          formatting=$(gofmt -l .)
+          if [ -n "$formatting" ]; then
+            printf 'Run gofmt on these files:\n%s\n' "$formatting"
+            exit 1
+          fi
       - name: Build Go API
         run: go build ./...
       - name: Test API and PostgreSQL integration
