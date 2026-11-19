@@ -169,8 +169,7 @@ class _SplashPageState extends State<SplashPage>
 
 
 // Go APIで試験する場合だけON。通常は既存のローカルUIと保存を維持する。
-// 現行Go APIには「保管場所変更/使用開始/交換」がまだないため、
-// 試験モードではこれらの操作を明示的に止め、DBとローカルの二重管理を避ける。
+// API接続版は在庫・機器・交換目安をGoで管理し、端末内データと混ぜない。
 const bool enableServerInventory = bool.fromEnvironment(
   'WATCHDENCHI_ENABLE_SERVER_INVENTORY',
   defaultValue: false,
@@ -296,6 +295,10 @@ class _PresentationTinyBattery extends StatelessWidget {
 
 class DeviceUsage {
   const DeviceUsage({
+    this.id,
+    this.deviceId,
+    this.batteryId,
+    this.recommendedReplacementDate,
     required this.deviceName,
     required this.type,
     required this.manufacturer,
@@ -308,6 +311,10 @@ class DeviceUsage {
     this.batteryStatus = '未設定',
   });
 
+  final int? id;
+  final int? deviceId;
+  final int? batteryId;
+  final String? recommendedReplacementDate;
   final String deviceName;
   final String type;
   final String manufacturer;
@@ -324,6 +331,8 @@ class DeviceUsage {
   final String batteryStatus;
 
   DeviceUsage withBatteryStatus(String value) => DeviceUsage(
+    id: id, deviceId: deviceId, batteryId: batteryId,
+    recommendedReplacementDate: recommendedReplacementDate,
     deviceName: deviceName, type: type, manufacturer: manufacturer,
     quantity: quantity, startedAt: startedAt, iconKey: iconKey,
     status: status, endedAt: endedAt,
@@ -333,6 +342,8 @@ class DeviceUsage {
   bool get isActive => status == 'active';
 
   DeviceUsage finish(DateTime endTime) => DeviceUsage(
+        id: id, deviceId: deviceId, batteryId: batteryId,
+        recommendedReplacementDate: recommendedReplacementDate,
         deviceName: deviceName,
         type: type,
         manufacturer: manufacturer,
@@ -357,6 +368,20 @@ class DeviceUsage {
         'manualReplacementAt': manualReplacementAt?.toIso8601String(),
         'batteryStatus': batteryStatus,
       };
+
+  factory DeviceUsage.fromServer(Map<String, dynamic> json) => DeviceUsage(
+    id: json['id'] as int,
+    deviceId: json['device_id'] as int,
+    batteryId: json['battery_id'] as int,
+    deviceName: json['device_name'] as String,
+    type: json['battery_type'] as String,
+    manufacturer: json['manufacturer'] as String,
+    quantity: json['battery_quantity'] as int,
+    startedAt: DateTime.parse(json['started_at'] as String).toLocal(),
+    iconKey: json['device_type'] == 'マウス' || json['device_type'] == 'mouse'
+      ? 'mouse' : 'other',
+    recommendedReplacementDate: json['recommended_replacement_date'] as String?,
+  );
 
   factory DeviceUsage.fromJson(Map<String, dynamic> json) => DeviceUsage(
         deviceName: json['deviceName'] as String? ?? '名前のない機器',
@@ -430,6 +455,11 @@ class LocalBatteryStore {
   }
 
   static Future<List<DeviceUsage>> readDevices() async {
+    if (enableServerInventory) {
+      await WatchDenchiServerServices.auth.restoreOrCreate();
+      final remote = await WatchDenchiServerServices.api.getDeviceBatteries();
+      return remote.map(DeviceUsage.fromServer).toList(growable: false);
+    }
     final saved = await _prefs.getString(deviceKey);
     if (saved == null) return [];
     final decoded = jsonDecode(saved) as List<dynamic>;
@@ -440,6 +470,9 @@ class LocalBatteryStore {
   }
 
   static Future<void> saveDevices(List<DeviceUsage> usages) async {
+    if (enableServerInventory) {
+      throw StateError('サーバーの機器情報はAPIで更新してください');
+    }
     await _prefs.setString(
       deviceKey,
       jsonEncode(usages.map((usage) => usage.toJson()).toList()),
@@ -600,6 +633,7 @@ class DeviceIconOption {
 }
 
 const List<DeviceIconOption> deviceIconOptions = [
+  DeviceIconOption('mouse', 'マウス', CupertinoIcons.desktopcomputer),
   DeviceIconOption('tv', 'テレビ', CupertinoIcons.tv),
   DeviceIconOption('clock', '時計', CupertinoIcons.clock),
   DeviceIconOption('aircon', 'エアコン', CupertinoIcons.snow),
@@ -1017,6 +1051,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  bool _serverMutationInFlight = false;
   List<BatteryEntry> inventory = [];
   List<DeviceUsage> devices = [];
   bool loading = true;
@@ -1046,13 +1081,17 @@ class _HomePageState extends State<HomePage> {
 
   // 電池交換と手入力ステータスを両方操作できる。
   Future<void> openDeviceActions(DeviceUsage usage) async {
+    if (_serverMutationInFlight) return;
     final action = await showCupertinoModalPopup<String>(
       context: context,
       builder: (popupContext) => CupertinoActionSheet(
         title: Text(usage.deviceName),
         message: Text(usage.type + '・' + usage.quantity.toString() + '本・' +
-          usage.manufacturer + '　現在：' + usage.batteryStatus),
+          usage.manufacturer + (usage.recommendedReplacementDate == null
+            ? '　現在：' + usage.batteryStatus
+            : '\n交換目安：' + usage.recommendedReplacementDate! + '（参考）')),
         actions: [
+          if (!enableServerInventory)
           CupertinoActionSheetAction(
             onPressed: () => Navigator.of(popupContext).pop('status'),
             child: const Text('電池の状態を設定する'),
@@ -1112,10 +1151,7 @@ class _HomePageState extends State<HomePage> {
 
   // 新しい電池を在庫棚から選び、同じ機器の使用履歴を継続する
   Future<void> chooseReplacement(DeviceUsage usage) async {
-    if (enableServerInventory) {
-      await showError(context, '交換APIはGo側で未実装です。サーバー試験モードでの交換は停止しています');
-      return;
-    }
+    if (_serverMutationInFlight) return;
     final choices = inventory
         .where((entry) => entry.type == usage.type)
         .toList();
@@ -1178,7 +1214,9 @@ class _HomePageState extends State<HomePage> {
         content: Text(
           '${usage.deviceName}の使用中の電池を終了し、'
           '${selected.manufacturer}の${selected.type}を${usage.quantity}本使い始めます。'
-          '\n古い電池の履歴は残し、在庫には戻しません。',
+          + (enableServerInventory
+            ? '\n新しく選んだ在庫だけを減らし、装着日と交換目安を更新します。'
+            : '\n古い電池の履歴は残し、在庫には戻しません。'),
         ),
         actions: [
           CupertinoDialogAction(
@@ -1193,6 +1231,27 @@ class _HomePageState extends State<HomePage> {
       ),
     );
     if (confirmed != true || !mounted) return;
+    if (enableServerInventory) {
+      if (_serverMutationInFlight) return;
+      if (usage.id == null || selected.id == null) {
+        await showError(context, '機器と在庫を読み直してください');
+        return;
+      }
+      setState(() => _serverMutationInFlight = true);
+      try {
+        await WatchDenchiServerServices.auth.restoreOrCreate();
+        await WatchDenchiServerServices.api.replaceDeviceBattery(
+          id: usage.id!, batteryId: selected.id!);
+        await loadHome();
+      } catch (error) {
+        if (!mounted) return;
+        await showError(context, '交換を確認できませんでした。再実行する前に一覧を確認してください。\n' + error.toString());
+        await loadHome();
+      } finally {
+        if (mounted) setState(() => _serverMutationInFlight = false);
+      }
+      return;
+    }
     final deviceIndex = devices.indexOf(usage);
     final stockIndex = inventory.indexOf(selected);
     if (deviceIndex < 0 || !devices[deviceIndex].isActive || stockIndex < 0 ||
@@ -1319,7 +1378,7 @@ class _HomePageState extends State<HomePage> {
                                         child: CupertinoButton(
                                           padding: const EdgeInsets.symmetric(
                                               vertical: 8, horizontal: 0),
-                                          onPressed: () =>
+                                          onPressed: _serverMutationInFlight ? null : () =>
                                               openDeviceActions(usage),
                                           child: Column(
                                             mainAxisSize: MainAxisSize.min,
@@ -1373,6 +1432,15 @@ class _HomePageState extends State<HomePage> {
                                                   height: 1.3,
                                                 ),
                                               ),
+                                              if (usage.recommendedReplacementDate != null) ...[
+                                                const SizedBox(height: 5),
+                                                Text('交換目安（参考）\n' + usage.recommendedReplacementDate!,
+                                                  textAlign: TextAlign.center,
+                                                  style: const TextStyle(color: mutedInk, fontSize: 12)),
+                                              ],
+                                              if (_serverMutationInFlight)
+                                                const CupertinoActivityIndicator(),
+
                                             ],
                                           ),
                                         ),
@@ -2849,6 +2917,9 @@ class InventoryPage extends StatefulWidget {
 }
 
 class _InventoryPageState extends State<InventoryPage> {
+  bool _serverMutationInFlight = false;
+  int? _pendingDeviceId;
+  String? _pendingDeviceName;
   List<BatteryEntry> entries = [];
   List<DeviceUsage> devices = [];
   bool loading = true;
@@ -2878,41 +2949,15 @@ class _InventoryPageState extends State<InventoryPage> {
   }
 
   Future<void> openAddPage() async {
+    if (_serverMutationInFlight) return;
     final newEntry = await Navigator.of(context).push<BatteryEntry>(
       CupertinoPageRoute<BatteryEntry>(builder: (_) => const AddBatteryPage()),
     );
     if (!mounted || newEntry == null) return;
 
     if (enableServerInventory) {
-      if (newEntry.location.trim().isEmpty) {
-        await showError(context, 'Go APIへ登録する場合、保管場所の入力が必要です');
-        return;
-      }
-      // 2026-11-19確認のGo mainにはchemical列/入力処理がない。
-      // APIは未知のJSONキーを無視するため、黙って保存済みに見せない。
-      final proceed = await showCupertinoDialog<bool>(
-        context: context,
-        builder: (dialogContext) => CupertinoAlertDialog(
-          title: const Text('Go API 接続テスト'),
-          content: const Text(
-            '今のGo側には電池の中身（chemical）の保存処理がまだありません。'
-            'このテスト登録では本数やメーカーはDBに保存されますが、'
-            '電池の中身は保存されません。テスト登録しますか？',
-          ),
-          actions: [
-            CupertinoDialogAction(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('やめる'),
-            ),
-            CupertinoDialogAction(
-              isDefaultAction: true,
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('テスト登録'),
-            ),
-          ],
-        ),
-      );
-      if (!mounted || proceed != true) return;
+      if (_serverMutationInFlight) return;
+      setState(() => _serverMutationInFlight = true);
       try {
         await WatchDenchiServerServices.auth.restoreOrCreate();
         await WatchDenchiServerServices.api.registerBattery(
@@ -2932,6 +2977,8 @@ class _InventoryPageState extends State<InventoryPage> {
         if (!mounted) return;
         await showError(context,
           'サーバー登録・一覧の更新を確認できませんでした。二重登録防止のため、再登録前にサーバー在庫を確認してください。\n$error');
+      } finally {
+        if (mounted) setState(() => _serverMutationInFlight = false);
       }
       return;
     }
@@ -2977,6 +3024,53 @@ class _InventoryPageState extends State<InventoryPage> {
       ),
     );
     if (!mounted || request == null) return;
+
+    if (enableServerInventory) {
+      if (_serverMutationInFlight) return;
+      if (request.iconKey != 'mouse') {
+        await showError(context, 'API接続版の交換目安はマウスに対応しています。マウスを選択してください。');
+        return;
+      }
+      if (entry.id == null) {
+        await showError(context, '在庫を読み直してください');
+        return;
+      }
+      setState(() => _serverMutationInFlight = true);
+      try {
+        await WatchDenchiServerServices.auth.restoreOrCreate();
+        final api = WatchDenchiServerServices.api;
+        if (_pendingDeviceId == null || _pendingDeviceName != request.deviceName) {
+          // 装着失敗後も未設定の機器を再利用し、機器だけが増えるのを防ぐ。
+          final existing = await api.getDevices();
+          final installed = await api.getDeviceBatteries();
+          final usedIds = installed.map((row) => row['device_id']).toSet();
+          Map<String, dynamic>? reusable;
+          for (final row in existing) {
+            if (row['name'] == request.deviceName && row['type'] == 'マウス' &&
+                !usedIds.contains(row['id'])) {
+              reusable = row;
+              break;
+            }
+          }
+          final device = reusable ?? await api.createDevice(
+            type: 'マウス', name: request.deviceName);
+          _pendingDeviceId = device['id'] as int;
+          _pendingDeviceName = request.deviceName;
+        }
+        await api.installDeviceBattery(deviceId: _pendingDeviceId!,
+          batteryId: entry.id!, batteryQuantity: request.quantity);
+        _pendingDeviceId = null;
+        _pendingDeviceName = null;
+        await loadEntries();
+      } catch (error) {
+        if (!mounted) return;
+        await showError(context, '装着を確認できませんでした。在庫と機器を確認してから再操作してください。\n' + error.toString());
+        await loadEntries();
+      } finally {
+        if (mounted) setState(() => _serverMutationInFlight = false);
+      }
+      return;
+    }
 
     final index = entries.indexOf(entry);
     if (index == -1 || request.quantity < 1 ||
@@ -3037,10 +3131,7 @@ class _InventoryPageState extends State<InventoryPage> {
   }
 
   Future<void> useBattery(BatteryEntry entry) async {
-    if (enableServerInventory) {
-      await showError(context, '機器登録・使用開始APIはGo側で未実装です。サーバー試験モードでは使用できません');
-      return;
-    }
+    if (_serverMutationInFlight) return;
     final request = await showCupertinoModalPopup<UseBatteryRequest>(
       context: context,
       builder: (_) => UseBatterySheet(entry: entry),
@@ -3100,9 +3191,10 @@ class _InventoryPageState extends State<InventoryPage> {
     return CupertinoPageScaffold(
       backgroundColor: cream,
       // 右上の追加ボタンは撤去。画面右下にスクロールしない固定ボタンを配置。
-      navigationBar: const CupertinoNavigationBar(
+      navigationBar: CupertinoNavigationBar(
         backgroundColor: cream,
         border: null,
+        middle: _serverMutationInFlight ? const Text('保存・予測中…') : null,
       ),
       child: SafeArea(
         child: Stack(

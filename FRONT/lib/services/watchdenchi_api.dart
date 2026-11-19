@@ -9,8 +9,7 @@ const watchDenchiApiBaseUrl = String.fromEnvironment(
   defaultValue: 'http://127.0.0.1:8080',
 );
 
-/// 現在のGo POST /api/batteryに合わせた項目＋新設予定のchemical。
-/// 現行GoはchemicalをまだDBに保存しない。UI側で警告して試験する。
+/// Go POST /api/batteryに渡す電池情報。
 class BatteryCreateRequest {
   const BatteryCreateRequest({
     required this.type,
@@ -94,7 +93,7 @@ class WatchDenchiApi {
   WatchDenchiApi({
     http.Client? client,
     String baseUrl = watchDenchiApiBaseUrl,
-    Duration timeout = const Duration(seconds: 8),
+    Duration timeout = const Duration(seconds: 90),
   })  : _client = client ?? http.Client(),
         _ownsClient = client == null,
         _baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
@@ -139,11 +138,25 @@ class WatchDenchiApi {
         response = await _client.post(_uri(path),
           headers: _headers(authenticated: authenticated),
           body: body == null ? null : jsonEncode(body)).timeout(_timeout);
+      } else if (method == 'PATCH') {
+        response = await _client.patch(_uri(path),
+          headers: _headers(authenticated: authenticated),
+          body: body == null ? null : jsonEncode(body)).timeout(_timeout);
       } else {
-        throw ArgumentError.value(method, 'method', 'GET/POSTのみ対応');
+        throw ArgumentError.value(method, 'method', 'GET/POST/PATCHのみ対応');
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw WatchDenchiApiException('Go APIからエラーが返りました',
+        var message = 'Go APIからエラーが返りました';
+        try {
+          final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+          if (decoded is Map && decoded['error'] is Map) {
+            final value = (decoded['error'] as Map)['message'];
+            if (value is String) message = value;
+          }
+        } on FormatException {
+          // テキスト形式のエラーはHTTPステータスで伝える。
+        }
+        throw WatchDenchiApiException(message,
           statusCode: response.statusCode);
       }
       return response;
@@ -198,10 +211,75 @@ class WatchDenchiApi {
     if (request.type.trim().isEmpty ||
         request.manufacturer.trim().isEmpty ||
         request.quantity < 1 ||
-        request.storageLocation.trim().isEmpty ||
         request.chemical.trim().isEmpty) {
       throw const FormatException('登録する電池情報が不正です');
     }
     await _send('POST', '/api/battery', body: request.toJson());
+  }
+
+  Future<Map<String, dynamic>> createDevice({
+    required String type, required String name,
+  }) async {
+    final response = await _send('POST', '/api/device',
+      body: {'type': type, 'name': name});
+    return _decodeObject(response);
+  }
+
+  Future<List<Map<String, dynamic>>> getDevices() async =>
+      _decodeList(await _send('GET', '/api/device'));
+
+  Future<List<Map<String, dynamic>>> getDeviceBatteries() async =>
+      _decodeList(await _send('GET', '/api/device-battery'));
+
+  /// 成功時の空本文はJSONとして解析しない。自動再送もしない。
+  Future<void> installDeviceBattery({
+    required int deviceId, required int batteryId, required int batteryQuantity,
+  }) async {
+    await _send('POST', '/api/device-battery', body: {
+      'device_id': deviceId,
+      'battery_id': batteryId,
+      'battery_quantity': batteryQuantity,
+    });
+  }
+
+  Future<void> replaceDeviceBattery({
+    required int id, required int batteryId,
+  }) async {
+    await _send('PATCH', '/api/device-battery',
+      body: {'id': id, 'battery_id': batteryId});
+  }
+
+  Future<void> updateBatteryQuantity({
+    required int id, required int quantity,
+  }) async {
+    await _send('PATCH', '/api/battery',
+      body: {'id': id, 'quantity': quantity});
+  }
+
+  Future<String> getPrediction(int deviceBatteryId) async {
+    final data = _decodeObject(await _send('GET',
+      '/api/prediction?device_battery_id=' + deviceBatteryId.toString()));
+    final date = data['recommended_replacement_date'];
+    if (date is! String) {
+      throw const WatchDenchiApiException('交換目安の日付が取得できません');
+    }
+    return date;
+  }
+
+  Map<String, dynamic> _decodeObject(http.Response response) {
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (data is! Map) {
+      throw const WatchDenchiApiException('APIの応答形式が不正です');
+    }
+    return Map<String, dynamic>.from(data);
+  }
+
+  List<Map<String, dynamic>> _decodeList(http.Response response) {
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (data is! List) {
+      throw const WatchDenchiApiException('APIの一覧形式が不正です');
+    }
+    return data.map((item) => Map<String, dynamic>.from(item as Map))
+      .toList(growable: false);
   }
 }
