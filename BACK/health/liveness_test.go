@@ -18,7 +18,7 @@ func TestLiveness(t *testing.T) {
 	}
 
 	var body map[string]string
-	
+
 	err := json.NewDecoder(response.Body).Decode(&body)
 	if err != nil {
 		t.Fatalf("decode response: %v", err)

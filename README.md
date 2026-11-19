@@ -74,3 +74,9 @@ WatchDenchi_app/
 
 - **CI**：`flutter.yml` は `FRONT/` でFlutterの静的解析・テストを実行します。`go.yml` は `BACK/` でGoのテスト・ビルドを実行し、`DB/` のSQLを使ってPostgreSQLとの接続も検証します。
 - **CD**：
+
+## API仕様と反映手順
+
+- [主要APIの仕様](docs/api.md)
+- [DB変更・Goのデプロイ手順](docs/device-api-deploy.md)
+- [Flutter担当者向けの接続指示](docs/flutter-integration.md)
