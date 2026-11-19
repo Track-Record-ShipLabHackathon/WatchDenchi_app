@@ -1,0 +1,16 @@
+mouse_manufacturer,model_family,type,chemical,battery_quantity,battery_manufacturer,service_days,pc_hours_per_day,mouse_active_fraction,label_kind,source_url,battery_source_url,checked_on
+BUFFALO,BSMBB538,AA,alkaline,1,unknown,972,8,0.05,published_maximum,https://www.buffalo.jp/product/detail/bsmbb538gbk.html,https://www.buffalo.jp/product/detail/bsmbb538gbk.html,2026-11-19
+BUFFALO,BSMRB015,AA,alkaline,1,unknown,745,8,0.05,published_maximum,https://www.buffalo.jp/product/detail/bsmrb015bk.html,https://www.buffalo.jp/product/detail/bsmrb015bk.html,2026-11-19
+BUFFALO,BSMBB115,AA,alkaline,1,unknown,612,8,0.05,published_maximum,https://www.buffalo.jp/product/detail/bsmbb115wh.html,https://www.buffalo.jp/product/detail/bsmbb115wh.html,2026-11-19
+BUFFALO,BSMBWK02,AA,alkaline,1,unknown,175,8,0.05,published_maximum,https://www.buffalo.jp/product/detail/bsmbwk02wh.html,https://www.buffalo.jp/product/detail/bsmbwk02wh.html,2026-11-19
+BUFFALO,BSMBB500,AA,alkaline,1,unknown,219,8,0.05,published_maximum,https://www.buffalo.jp/product/detail/bsmbb500mwh.html,https://www.buffalo.jp/product/detail/bsmbb500mwh.html,2026-11-19
+BUFFALO,BSMBW300,AA,alkaline,1,unknown,259,8,0.05,published_maximum,https://www.buffalo.jp/product/detail/bsmbw300mbkjy.html,https://www.buffalo.jp/product/detail/bsmbw300mbkjy.html,2026-11-19
+BUFFALO,BSMBB305,AA,alkaline,1,unknown,1029,8,0.05,published_maximum,https://www.buffalo.jp/product/detail/bsmbb305vbbk.html,https://www.buffalo.jp/product/detail/bsmbb305vbbk.html,2026-11-19
+BUFFALO,BSMOW20S,AA,alkaline,1,unknown,209,8,0.05,published_reference,https://www.buffalo.jp/product/detail/bsmow20sbk.html,https://www.buffalo.jp/product/detail/bsmow20sbk.html,2026-11-19
+BUFFALO,BSMRB055,AA,alkaline,1,unknown,490,8,0.05,published_maximum,https://www.buffalo.jp/product/detail/bsmrb055wh.html,https://www.buffalo.jp/product/detail/bsmrb055wh.html,2026-11-19
+BUFFALO,BSMRW115,AA,alkaline,1,unknown,1070,8,0.05,published_maximum,https://www.buffalo.jp/product/detail/bsmrw115vbbk.html,https://www.buffalo.jp/product/detail/bsmrw115vbbk.html,2026-11-19
+BUFFALO,BSMBW500,AA,alkaline,1,unknown,621,8,0.05,published_maximum,https://www.buffalo.jp/product/detail/bsmbw500lbk.html,https://www.buffalo.jp/product/detail/bsmbw500lbk.html,2026-11-19
+ELECOM,M-TP20BB,AAA,alkaline,1,unknown,230,8,0.05,published_reference,https://www.elecom.co.jp/support/manual/peripheral/mouse/m-tp20bb/m-tp20bb_v2.pdf,https://www.elecom.co.jp/support/manual/peripheral/mouse/m-tp20bb/m-tp20bb_v2.pdf,2026-11-19
+ELECOM,M-DY11DR,AAA,alkaline,1,unknown,215,8,0.05,published_reference,https://www.elecom.co.jp/news/201606/m-dy10dr_dy11dr/,https://www.elecom.co.jp/news/201606/m-dy10dr_dy11dr/,2026-11-19
+ELECOM,M-BT13BL,AAA,alkaline,2,unknown,466,8,0.05,published_reference,https://www.elecom.co.jp/support/manual/peripheral/mouse/M-BT13BL.pdf,https://www.elecom.co.jp/products/M-BT13BLBU.html,2026-11-19
+ELECOM,M-BT19BB,AAA,alkaline,2,unknown,476,8,0.05,published_reference,https://www.elecom.co.jp/support/manual/peripheral/mouse/m-bt19bb/m-bt19bb_v1.pdf,https://www.elecom.co.jp/support/manual/peripheral/mouse/m-bt19bb/m-bt19bb_v1.pdf,2026-11-19
