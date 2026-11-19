@@ -2,7 +2,6 @@ package main
 
 import (
  "bytes"
- "context"
  "database/sql"
  "encoding/json"
  "fmt"
@@ -166,4 +165,3 @@ func TestCORSPatch(t *testing.T){
  response=httptest.NewRecorder();handler.ServeHTTP(response,request);if response.Code!=403{t.Fatal("untrusted origin accepted")}
 }
 
-var _ = context.Background
