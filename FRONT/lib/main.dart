@@ -2228,6 +2228,7 @@ class _DisposalPageState extends State<DisposalPage> {
   }
 
   // もともとの地域検索・登録処理をそのまま使い、表示場所だけ移動する。
+  // ignore: unused_element
   Future<void> _showRegionSettings() async {
     await showCupertinoModalPopup<void>(
       context: context,
@@ -2286,6 +2287,7 @@ class _DisposalPageState extends State<DisposalPage> {
     );
   }
 
+  // ignore: unused_element
   Future<void> _showOfficialGuides() async {
     await showCupertinoModalPopup<void>(
       context: context,
@@ -2541,9 +2543,6 @@ class _DisposalPageState extends State<DisposalPage> {
 
   @override
   Widget build(BuildContext context) {
-    final availableDistricts = selectedMunicipality == null
-        ? const <DisposalAreaOption>[]
-        : DisposalAreaCatalog.districtsFor(selectedMunicipality!.code);
     final next = nextNahaCollectionDate(DateTime.now());
     final steps = disposalSteps;
     return CupertinoPageScaffold(
