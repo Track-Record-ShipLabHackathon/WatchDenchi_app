@@ -1,0 +1,122 @@
+{
+  "target": "published_reference_service_days_not_observed_replacement_days",
+  "method": "leave_one_product_family_out",
+  "rows": 15,
+  "groups": 13,
+  "model_mae_days": 238.66666666666666,
+  "median_baseline_mae_days": 256.6666666666667,
+  "better_than_baseline": true,
+  "real_world_replacement_accuracy_validated": false,
+  "notes": [
+    "Maximum/reference specification labels are mixed and are not measured user lifetimes.",
+    "Battery size is confounded with mouse manufacturer in this small convenience sample.",
+    "No random rows, synthetic lifetimes, or product model identifiers are used as prediction features."
+  ],
+  "held_out_predictions": [
+    {
+      "model_family": "BSMBB305",
+      "group": "BUFFALO:BSMBB305",
+      "actual_published_days": 1029.0,
+      "predicted_days": 551.0,
+      "baseline_days": 471.0
+    },
+    {
+      "model_family": "BSMBB538",
+      "group": "BUFFALO:BSMBB538",
+      "actual_published_days": 972.0,
+      "predicted_days": 551.0,
+      "baseline_days": 471.0
+    },
+    {
+      "model_family": "BSMBW300",
+      "group": "BUFFALO:BSMBW300",
+      "actual_published_days": 259.0,
+      "predicted_days": 616.5,
+      "baseline_days": 483.0
+    },
+    {
+      "model_family": "BSMBWK02",
+      "group": "BUFFALO:BSMBWK02",
+      "actual_published_days": 175.0,
+      "predicted_days": 616.5,
+      "baseline_days": 483.0
+    },
+    {
+      "model_family": "BSMOW20S",
+      "group": "BUFFALO:BSMOW20S",
+      "actual_published_days": 209.0,
+      "predicted_days": 616.5,
+      "baseline_days": 483.0
+    },
+    {
+      "model_family": "BSMRB015",
+      "group": "BUFFALO:BSMRB015",
+      "actual_published_days": 745.0,
+      "predicted_days": 551.0,
+      "baseline_days": 471.0
+    },
+    {
+      "model_family": "BSMRB055",
+      "group": "BUFFALO:BSMRB055",
+      "actual_published_days": 490.0,
+      "predicted_days": 616.5,
+      "baseline_days": 471.0
+    },
+    {
+      "model_family": "BSMBB115",
+      "group": "BUFFALO_115_family",
+      "actual_published_days": 612.0,
+      "predicted_days": 490.0,
+      "baseline_days": 466.0
+    },
+    {
+      "model_family": "BSMRW115",
+      "group": "BUFFALO_115_family",
+      "actual_published_days": 1070.0,
+      "predicted_days": 490.0,
+      "baseline_days": 466.0
+    },
+    {
+      "model_family": "BSMBB500",
+      "group": "BUFFALO_500_family",
+      "actual_published_days": 219.0,
+      "predicted_days": 612.0,
+      "baseline_days": 476.0
+    },
+    {
+      "model_family": "BSMBW500",
+      "group": "BUFFALO_500_family",
+      "actual_published_days": 621.0,
+      "predicted_days": 612.0,
+      "baseline_days": 476.0
+    },
+    {
+      "model_family": "M-BT13BL",
+      "group": "ELECOM:M-BT13BL",
+      "actual_published_days": 466.0,
+      "predicted_days": 476.0,
+      "baseline_days": 483.0
+    },
+    {
+      "model_family": "M-BT19BB",
+      "group": "ELECOM:M-BT19BB",
+      "actual_published_days": 476.0,
+      "predicted_days": 466.0,
+      "baseline_days": 478.0
+    },
+    {
+      "model_family": "M-DY11DR",
+      "group": "ELECOM:M-DY11DR",
+      "actual_published_days": 215.0,
+      "predicted_days": 230.0,
+      "baseline_days": 483.0
+    },
+    {
+      "model_family": "M-TP20BB",
+      "group": "ELECOM:M-TP20BB",
+      "actual_published_days": 230.0,
+      "predicted_days": 215.0,
+      "baseline_days": 483.0
+    }
+  ]
+}
