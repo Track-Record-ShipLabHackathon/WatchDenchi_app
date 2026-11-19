@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'services/anonymous_session.dart';
 import 'services/watchdenchi_api.dart';
+import 'services/replacement_status.dart';
 
 // アプリの色と選択肢
 const Color cream = Color(0xFFF5EFE5);
@@ -217,12 +218,16 @@ class BatteryEntry {
 // 通常は「未設定」。?demoBadges=1 でサンプルの色分けを表示する。
 // 状態はユーザーの手入力値。実測値やAI予測値ではない。
 class _PresentationBatteryStatusBadge extends StatelessWidget {
-  const _PresentationBatteryStatusBadge({required this.status});
+  const _PresentationBatteryStatusBadge({required this.status, this.showBatteryIcon = true});
   final String status;
+  final bool showBatteryIcon;
 
   @override
   Widget build(BuildContext context) {
     final fill = switch (status) {
+      '目安前' => const Color(0xFF68A678),
+      '交換準備' => const Color(0xFFE6AD36),
+      '交換目安' => const Color(0xFFD86B64),
       '安心' => const Color(0xFF68A678),
       '準備' => const Color(0xFFE6AD36),
       '交換' => const Color(0xFFD86B64),
@@ -241,7 +246,7 @@ class _PresentationBatteryStatusBadge extends StatelessWidget {
         border: Border.all(color: paper, width: 1.5),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        if (status != '未設定') ...[
+        if (showBatteryIcon && status != '未設定') ...[
           _PresentationTinyBattery(level: level),
           const SizedBox(width: 4),
         ],
@@ -1087,9 +1092,11 @@ class _HomePageState extends State<HomePage> {
       builder: (popupContext) => CupertinoActionSheet(
         title: Text(usage.deviceName),
         message: Text(usage.type + '・' + usage.quantity.toString() + '本・' +
-          usage.manufacturer + (usage.recommendedReplacementDate == null
-            ? '　現在：' + usage.batteryStatus
-            : '\n交換目安：' + usage.recommendedReplacementDate! + '（参考）')),
+          usage.manufacturer + (enableServerInventory
+            ? '\n' + replacementStatusFor(usage.recommendedReplacementDate) +
+              (usage.recommendedReplacementDate == null ? ''
+                : '\n交換目安：' + usage.recommendedReplacementDate! + '（参考）')
+            : '　現在：' + usage.batteryStatus)),
         actions: [
           if (!enableServerInventory)
           CupertinoActionSheetAction(
@@ -1413,7 +1420,10 @@ class _HomePageState extends State<HomePage> {
                                                       top: -7,
                                                       right: -8,
                                                       child: _PresentationBatteryStatusBadge(
-                                                        status: usage.batteryStatus,
+                                                        status: enableServerInventory
+                                                          ? replacementStatusFor(usage.recommendedReplacementDate)
+                                                          : usage.batteryStatus,
+                                                        showBatteryIcon: !enableServerInventory,
                                                       ),
                                                     ),
                                                   ],
