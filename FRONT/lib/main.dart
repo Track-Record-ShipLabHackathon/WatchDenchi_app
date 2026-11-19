@@ -238,6 +238,94 @@ class BatteryEntry {
       );
 }
 
+// 発表用の画面確認: 実際の電池残量・Pythonの予測日ではない。
+// 通常は「未設定」。?demoBadges=1 でサンプルの色分けを表示する。
+class _PresentationBatteryStatusBadge extends StatelessWidget {
+  const _PresentationBatteryStatusBadge({required this.deviceIndex});
+  final int deviceIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    final demo = Uri.base.queryParameters['demoBadges'] == '1';
+    final status = demo
+        ? const ['安心', '準備', '交換', '未設定'][deviceIndex % 4]
+        : '未設定';
+    final fill = switch (status) {
+      '安心' => const Color(0xFF68A678),
+      '準備' => const Color(0xFFE6AD36),
+      '交換' => const Color(0xFFD86B64),
+      _ => const Color(0xFF9B958F),
+    };
+    final batteryLevel = switch (status) {
+      '安心' => 3,
+      '準備' => 1,
+      _ => 0,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(50),
+        border: Border.all(color: paper, width: 1.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (status != '未設定') ...[
+            _PresentationTinyBattery(level: batteryLevel),
+            const SizedBox(width: 4),
+          ],
+          Text(status,
+              style: const TextStyle(
+                color: CupertinoColors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              )),
+        ],
+      ),
+    );
+  }
+}
+
+class _PresentationTinyBattery extends StatelessWidget {
+  const _PresentationTinyBattery({required this.level});
+  final int level;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 15, height: 9,
+            padding: const EdgeInsets.all(1.6),
+            decoration: BoxDecoration(
+              border: Border.all(color: CupertinoColors.white, width: 1.2),
+              borderRadius: BorderRadius.circular(2),
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: level == 0 ? 0.13 : level / 3,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: CupertinoColors.white,
+                    borderRadius: BorderRadius.circular(1),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Container(
+            width: 2, height: 4,
+            decoration: const BoxDecoration(
+              color: CupertinoColors.white,
+              borderRadius: BorderRadius.horizontal(right: Radius.circular(1)),
+            ),
+          ),
+        ],
+      );
+}
+
 class DeviceUsage {
   const DeviceUsage({
     required this.deviceName,
@@ -1211,20 +1299,40 @@ class _HomePageState extends State<HomePage> {
                                           child: Column(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              // 予測APIの結果が来るまではステータスバッジを表示しない。
-                                              Container(
-                                                width: 80,
-                                                height: 80,
-                                                alignment: Alignment.center,
-                                                decoration: BoxDecoration(
-                                                  color: paleCoral,
-                                                  borderRadius: BorderRadius.circular(25),
-                                                  border: Border.all(color: const Color(0xFFF0CCC5)),
-                                                ),
-                                                child: Icon(
-                                                  resolvedDeviceIcon(usage.iconKey).icon,
-                                                  color: coral,
-                                                  size: 39,
+                                              // 元の機器アイコンと重ねて右上に電池ステータスを配置。
+                                              SizedBox(
+                                                width: 82,
+                                                height: 85,
+                                                child: Stack(
+                                                  clipBehavior: Clip.none,
+                                                  children: [
+                                                    Positioned(
+                                                      left: 1,
+                                                      bottom: 0,
+                                                      child: Container(
+                                                        width: 80,
+                                                        height: 80,
+                                                        alignment: Alignment.center,
+                                                        decoration: BoxDecoration(
+                                                          color: paleCoral,
+                                                          borderRadius: BorderRadius.circular(25),
+                                                          border: Border.all(color: const Color(0xFFF0CCC5)),
+                                                        ),
+                                                        child: Icon(
+                                                          resolvedDeviceIcon(usage.iconKey).icon,
+                                                          color: coral,
+                                                          size: 39,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    Positioned(
+                                                      top: -7,
+                                                      right: -8,
+                                                      child: _PresentationBatteryStatusBadge(
+                                                        deviceIndex: activeDevices.indexOf(usage),
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
                                               const SizedBox(height: 9),
@@ -1249,6 +1357,11 @@ class _HomePageState extends State<HomePage> {
                               );
                             },
                           ),
+                        if (Uri.base.queryParameters['demoBadges'] == '1') ...[
+                          const SizedBox(height: 10),
+                          const Text('※ 発表用のサンプル表示です。実際の残量や予測結果ではありません。',
+                              style: TextStyle(color: mutedInk, fontSize: 11)),
+                        ],
                         const SizedBox(height: 25),
                       ]),
                     ),
