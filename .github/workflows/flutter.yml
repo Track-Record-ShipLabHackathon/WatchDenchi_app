@@ -45,7 +45,7 @@ jobs:
           --no-pub
           --base-href /WatchDenchi_app/
           --dart-define=WATCHDENCHI_API_BASE_URL=https://watchdenchi-app.onrender.com
-          --dart-define=WATCHDENCHI_ENABLE_SERVER_AUTH=true
+          --dart-define=WATCHDENCHI_ENABLE_SERVER_AUTH=false
 
       # Separate build: keep server inventory disabled on the normal page.
       # Both paths share the Origin allowed by the Go server.
@@ -56,7 +56,7 @@ jobs:
           --output build/api-preview
           --base-href /WatchDenchi_app/api-preview/
           --dart-define=WATCHDENCHI_API_BASE_URL=https://watchdenchi-app.onrender.com
-          --dart-define=WATCHDENCHI_ENABLE_SERVER_AUTH=true
+          --dart-define=WATCHDENCHI_ENABLE_SERVER_AUTH=false
           --dart-define=WATCHDENCHI_ENABLE_SERVER_INVENTORY=true
 
       - name: Include API preview in Pages artifact
